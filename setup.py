@@ -24,7 +24,8 @@ setup(
     url='https://github.com/shibing624/autocoder',
     license='Apache License 2.0',
     zip_safe=False,
-    python_requires='>=3.8',
+    python_requires='>=3.8.0',
+    entry_points={"console_scripts": ["codev = codev.cli:main"]},
     classifiers=[
         'Intended Audience :: Developers',
         'Operating System :: OS Independent',
@@ -36,7 +37,7 @@ setup(
         'Topic :: Text Processing :: Indexing',
         'Topic :: Text Processing :: Linguistic',
     ],
-    keywords='CodeGenie,autocomplete,code-autocomplete',
+    keywords='codev,code-agent,code-completion,code-generation,code-assistant',
     install_requires=[
         "loguru",
         "openai",
