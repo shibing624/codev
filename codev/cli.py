@@ -1,20 +1,21 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-import os
+"""
+@author:XuMing(xuming624@qq.com)
+@description:
+"""
 import sys
 import argparse
 
-from codev.chat_terminal import TerminalChat
+from codev.terminal_chat import TerminalChat
 from codev.config import load_config
 from codev.utils.models import get_available_models
 
 
 def main():
     """
-    Main entry point for the Codex CLI application
+    Main entry point for the CLI application
     """
-    parser = argparse.ArgumentParser(description="Codex CLI - A command-line interface for code generation with AI")
+    parser = argparse.ArgumentParser(description="CLI - A command-line interface for code generation with AI")
     parser.add_argument("--model", type=str, help="The model to use for generation")
     parser.add_argument("--prompt", type=str, help="Initial prompt to send to the model")
     parser.add_argument("--image", action="append", help="Image file paths to include with the prompt")
@@ -61,7 +62,7 @@ def main():
     try:
         terminal.run()
     except KeyboardInterrupt:
-        print("\nExiting Codex CLI...")
+        print("\nExiting Codev CLI...")
         sys.exit(0)
 
 

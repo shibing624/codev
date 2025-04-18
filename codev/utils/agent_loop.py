@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+"""
+@author:XuMing(xuming624@qq.com)
+@description:
+"""
 import os
 import json
 import time
-import logging
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass

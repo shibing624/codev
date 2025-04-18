@@ -1,6 +1,8 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+"""
+@author:XuMing(xuming624@qq.com)
+@description:
+"""
 import os
 import json
 from dataclasses import dataclass, field
@@ -15,7 +17,7 @@ CLI_VERSION = __version__
 
 @dataclass
 class AppConfig:
-    """Configuration for the Codex CLI application"""
+    """Configuration for the CLI application"""
     model: str = DEFAULT_MODEL
     instructions: Optional[str] = None
     notify: bool = False
