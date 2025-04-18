@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 # Avoids IDE errors, but actual version is read from version.py
 __version__ = ""
-exec(open('agentica/version.py').read())
+exec(open('codev/version.py').read())
 
 if sys.version_info < (3,):
     sys.exit('Sorry, Python3 is required.')
