@@ -8,14 +8,13 @@
 
 -----------------
 
-# CodeV: 在终端中运行的编码助手
-[![PyPI version](https://badge.fury.io/py/codev.svg)](https://badge.fury.io/py/codev)
+# CodeV: Coding Agent That Runs in Your Terminal
+[![PyPI version](https://badge.fury.io/py/pycodev.svg)](https://badge.fury.io/py/pycodev)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub contributors](https://img.shields.io/github/contributors/shibing624/codev.svg)](https://github.com/shibing624/codev/graphs/contributors)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![python_vesion](https://img.shields.io/badge/Python-3.5%2B-green.svg)](requirements.txt)
+[![python_vesion](https://img.shields.io/badge/Python-3.8%2B-green.svg)](requirements.txt)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/codev.svg)](https://github.com/shibing624/codev/issues)
-[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#联系我们)
+[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 ## 简介
 
