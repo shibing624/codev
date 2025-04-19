@@ -52,8 +52,6 @@ class HistoryManager:
             
             # Clean up old backups (keep at most 10)
             self._cleanup_old_backups()
-            
-            logger.debug(f"Created history backup: {backup_file}")
         except Exception as e:
             logger.error(f"Failed to create history backup: {str(e)}")
     
