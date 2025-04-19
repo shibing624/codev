@@ -28,10 +28,8 @@ def generate_command_explanation(command: List[str], model: str) -> str:
     Returns:
         A string explaining what the command does
     """
-    # This would typically call the OpenAI API to generate an explanation
-    # For now, we'll return a simple explanation
-    command_str = " ".join(command)
-    return f"This command would execute: {command_str}\n\nThis might affect your system. Please review carefully."
+    command_str = str(command)
+    return f"This command would execute: `{command_str}`\n\nThis might affect your system. Please review carefully."
 
 
 def confirm_command(command: List[str], patch: Optional[ApplyPatchCommand] = None) -> Tuple[str, Optional[str]]:

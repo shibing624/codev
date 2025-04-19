@@ -88,8 +88,22 @@ codev --approval-policy suggest|auto-edit|full-auto
 
 ## In-Chat Commands
 
-- `/exit` or `/quit`: Exit the application
-- `/clear`: Clear the terminal screen
+- `/help` - Show help information
+- `/model` - Switch the LLM model during a session
+- `/approval` - Switch approval policy mode
+- `/history` - Show command & file history for the session
+- `/clear` - Clear screen and context
+- `/clearhistory` - Clear command history
+- `/compact` - Condense context into a summary
+- `/exit` or `/quit` - Exit the application
+
+## Keyboard Shortcuts
+
+- Enter - Send message
+- Ctrl+J - Insert newline
+- Up/Down - Scroll prompt history
+- Esc(×2) - Interrupt current action
+- Ctrl+C - Quit Codev
 
 ## Configuration
 

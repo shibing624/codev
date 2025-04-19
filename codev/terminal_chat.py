@@ -17,59 +17,8 @@ from codev.config import AppConfig, CLI_VERSION, OPENAI_BASE_URL
 from codev.utils.agent_loop import ReviewDecision, CommandConfirmation, ApplyPatchCommand
 from codev.format_command import format_command_for_display
 from codev.approvals import generate_command_explanation, ApprovalPolicy
-
-
-# Terminal colors
-class TermColor:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
-
-    # Foreground colors
-    BLACK = "\033[30m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-    CYAN = "\033[36m"
-    WHITE = "\033[37m"
-
-    # Bright foreground colors
-    BRIGHT_BLACK = "\033[90m"
-    BRIGHT_RED = "\033[91m"
-    BRIGHT_GREEN = "\033[92m"
-    BRIGHT_YELLOW = "\033[93m"
-    BRIGHT_BLUE = "\033[94m"
-    BRIGHT_MAGENTA = "\033[95m"
-    BRIGHT_CYAN = "\033[96m"
-    BRIGHT_WHITE = "\033[97m"
-
-
-# Color mapping
-COLOR_MAP = {
-    "red": TermColor.RED,
-    "green": TermColor.GREEN,
-    "yellow": TermColor.YELLOW,
-    "blue": TermColor.BLUE,
-    "magenta": TermColor.MAGENTA,
-    "cyan": TermColor.CYAN,
-    "white": TermColor.WHITE,
-    "bright_red": TermColor.BRIGHT_RED,
-    "bright_green": TermColor.BRIGHT_GREEN,
-    "bright_yellow": TermColor.BRIGHT_YELLOW,
-    "bright_blue": TermColor.BRIGHT_BLUE,
-    "bright_magenta": TermColor.BRIGHT_MAGENTA,
-    "bright_cyan": TermColor.BRIGHT_CYAN,
-    "bright_white": TermColor.BRIGHT_WHITE,
-}
-
-# Policy colors
-POLICY_COLORS = {
-    "suggest": TermColor.WHITE,
-    "auto-edit": TermColor.BRIGHT_GREEN,
-    "full-auto": TermColor.GREEN,
-}
+from codev.commands import CommandHandler, TermColor, COLOR_MAP, POLICY_COLORS
+from codev.history_manager import HistoryManager
 
 
 def colored_text(text: str, color: str) -> str:
@@ -134,10 +83,18 @@ class TerminalChat:
         self.full_stdout = full_stdout
 
         self.conversation_history = []
+        self.command_history = []
+        self.file_edit_history = []
         self.loading = False
         self.thinking_seconds = 0
         self.should_exit = False
         self.current_stream = None
+        
+        # Initialize history manager
+        self.history_manager = HistoryManager()
+        
+        # Initialize command handler
+        self.command_handler = CommandHandler(self)
 
         # Initialize OpenAI client
         self.client = OpenAI(
@@ -280,127 +237,160 @@ class TerminalChat:
 
     def execute_tool_call(self, tool_call):
         """
-        Execute a tool call from the AI assistant
+        Execute a tool call from the AI
         
         Args:
             tool_call: The tool call to execute
             
         Returns:
-            Tool call result
+            Result of the tool execution
         """
         function_name = tool_call.function.name
-
-        try:
-            arguments = json.loads(tool_call.function.arguments)
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse tool call arguments: {tool_call.function.arguments}")
-            return "Error: Failed to parse tool call arguments"
+        function_args = json.loads(tool_call.function.arguments)
 
         if function_name == "run_terminal_cmd":
-            command = arguments.get("command", "")
-            is_background = arguments.get("is_background", False)
+            command = function_args.get("command", "")
+            is_background = function_args.get("is_background", False)
+            
+            # Add command to in-memory history
+            self.command_history.append(command)
+            
+            # Format command for display
+            formatted_command = format_command_for_display(command)
 
-            # Display the command info
-            bg_info = " (background)" if is_background else ""
-            print(colored_text(f"Running command{bg_info}: {command}", "bright_yellow"))
+            # Generate command explanation
+            explanation = generate_command_explanation(command, self.config.model)
 
-            # Check if we need to confirm this command
-            if self.approval_policy != "full-auto":
-                # Parse command into list if it's a string
-                cmd_list = command.split() if isinstance(command, str) else command
+            # Determine if user confirmation is needed
+            requires_approval = self.approval_policy != "full-auto"
+            if self.approval_policy == "auto-edit":
+                # In auto-edit mode, only shell commands need confirmation
+                requires_approval = True
 
-                # Get confirmation from user
-                confirmation = self.get_command_confirmation(cmd_list, None)
+            if requires_approval:
+                # Display command and request confirmation
+                policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
+                policy_name = self.approval_policy.upper()
+                print(f"\n{policy_color}[{policy_name}]{TermColor.RESET} {TermColor.CYAN}Recommended command:{TermColor.RESET}")
+                print(f"{TermColor.BRIGHT_WHITE}{formatted_command}{TermColor.RESET}")
+                
+                if explanation:
+                    print(f"{TermColor.YELLOW}Explanation: {explanation}{TermColor.RESET}")
+                
+                print("\nExecute this command? (y/n)")
+                decision = input("> ").strip().lower()
+                
+                if decision != "y":
+                    return "User cancelled the command execution."
 
-                if confirmation.review != ReviewDecision.APPROVE:
-                    # Command was denied
-                    deny_message = confirmation.custom_deny_message or "Command not approved by user"
-                    print(colored_text(f"Command denied: {deny_message}", "bright_red"))
-                    return deny_message
-
-            # Run the command
+            # Execute command
+            print(f"\n{TermColor.GREEN}Executing command:{TermColor.RESET} {formatted_command}\n")
+            
             try:
                 if is_background:
-                    # Run in background (non-blocking)
-                    subprocess.Popen(
-                        command if isinstance(command, str) else command.split(),
-                        shell=isinstance(command, str),
+                    # Run in background
+                    process = subprocess.Popen(
+                        command,
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    result = f"Command started in the background, Command: `{command}`, PID: {process.pid}"
+                    # Record to history manager
+                    self.history_manager.add_command(command, True, result)
+                    return result
+                else:
+                    # Capture output
+                    process = subprocess.Popen(
+                        command,
+                        shell=True,
                         stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
+                        stderr=subprocess.PIPE,
+                        text=True
                     )
-                    result = f"Command running in background, command: {command}"
-                else:
-                    # Run blocking with timeout
-                    proc = subprocess.run(
-                        command if isinstance(command, str) else command.split(),
-                        shell=isinstance(command, str),
-                        capture_output=True,
-                        text=True,
-                        timeout=300  # 5 minute timeout
-                    )
-                    result = f"Command: {command}\n" + proc.stdout + "\n" + proc.stderr
-
-                # Display result
-                print(colored_text("Result:", "bright_magenta"))
-                if not self.full_stdout and len(result.split("\n")) > 10:
-                    lines = result.split("\n")
-                    print("\n".join(lines[:10]))
-                    print(colored_text(f"... and {len(lines) - 10} more lines (use --full-stdout to see all)",
-                                       "bright_black"))
-                else:
-                    print(result)
-
-                return result
-
+                    stdout, stderr = process.communicate()
+                    
+                    # Determine output based on full_stdout setting
+                    if self.full_stdout or len(stdout) < 1000:
+                        output = stdout
+                    else:
+                        # If output is too long, truncate display
+                        lines = stdout.split("\n")
+                        if len(lines) > 15:
+                            output = "\n".join(lines[:15])
+                            output += f"\n... (truncated, total {len(lines)} lines)"
+                        else:
+                            output = stdout
+                    
+                    # If there are errors, include stderr
+                    if process.returncode != 0 and stderr:
+                        output += f"\nError: {stderr}"
+                        
+                    # Record to history manager
+                    success = process.returncode == 0
+                    self.history_manager.add_command(command, success, output)
+                    
+                    return output or "Command executed successfully (no output)"
             except Exception as e:
-                error_result = f"Error executing command: {str(e)}"
-                print(colored_text(error_result, "bright_red"))
-                return error_result
+                error_msg = f"Error executing command: {str(e)}"
+                # Record to history manager
+                self.history_manager.add_command(command, False, error_msg)
+                return error_msg
 
         elif function_name == "edit_file":
-            target_file = arguments.get("target_file", "")
-            code_edit = arguments.get("code_edit", "")
-
-            # Display file edit info
-            print(colored_text(f"Editing file: {target_file}", "bright_yellow"))
-
-            # Check if we need to confirm this edit
-            if self.approval_policy != "full-auto" and self.approval_policy != "auto-edit":
-                # Create an ApplyPatchCommand
-                apply_patch = ApplyPatchCommand(
-                    file_path=target_file,
-                    content=code_edit
-                )
-
-                # Get confirmation from user
-                confirmation = self.get_command_confirmation(["edit", target_file], apply_patch)
-
-                if confirmation.review != ReviewDecision.APPROVE:
-                    # Edit was denied
-                    deny_message = confirmation.custom_deny_message or "File edit not approved by user"
-                    print(colored_text(f"Edit denied: {deny_message}", "bright_red"))
-                    return deny_message
-
-            # Apply the edit
+            target_file = function_args.get("target_file", "")
+            code_edit = function_args.get("code_edit", "")
+            
+            # Add file edit to in-memory history
+            self.file_edit_history.append(target_file)
+            
+            # Determine if user confirmation is required
+            requires_approval = self.approval_policy == "suggest"
+            
+            if requires_approval:
+                # Display edit and request confirmation
+                policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
+                policy_name = self.approval_policy.upper()
+                print(f"\n{policy_color}[{policy_name}]{TermColor.RESET} {TermColor.CYAN}Recommended file edit:{TermColor.RESET}")
+                print(f"{TermColor.BRIGHT_WHITE}File: {target_file}{TermColor.RESET}")
+                
+                # Show edit preview
+                print(f"\nPreview:")
+                max_lines = 15
+                lines = code_edit.split("\n")
+                preview = "\n".join(lines[:max_lines])
+                if len(lines) > max_lines:
+                    preview += f"\n... (truncated, total {len(lines)} lines)"
+                print(f"{TermColor.BRIGHT_WHITE}{preview}{TermColor.RESET}")
+                
+                print("\nApply this edit? (y/n)")
+                decision = input("> ").strip().lower()
+                
+                if decision != "y":
+                    return "User cancelled the file edit."
+            
+            # Apply edit
             try:
-                # Create directory if it doesn't exist
+                # Ensure directory exists
                 os.makedirs(os.path.dirname(os.path.abspath(target_file)), exist_ok=True)
-
-                # Write the file
+                
+                # Write to file
                 with open(target_file, "w") as f:
                     f.write(code_edit)
-
-                result = f"Successfully wrote to {target_file}"
-                print(colored_text(result, "bright_green"))
-                return result
-
+                
+                # Determine operation type (create or edit)
+                operation = "create" if not os.path.exists(target_file) else "edit"
+                
+                # Record to history manager
+                self.history_manager.add_file_edit(target_file, operation)
+                
+                return f"Successfully edited file: {target_file}"
             except Exception as e:
-                error_result = f"Error editing file: {str(e)}"
-                print(colored_text(error_result, "bright_red"))
-                return error_result
-
-        else:
-            return f"Unknown tool call: {function_name}"
+                error_msg = f"Error editing file: {str(e)}"
+                # TODO: Consider recording failed edit attempts
+                return error_msg
+        
+        return "Unsupported tool call."
 
     def handle_ai_message(self, message):
         """Display AI message and handle any tool calls"""
@@ -441,16 +431,22 @@ class TerminalChat:
                 })
 
     def handle_streaming_response(self, stream):
-        """Handle a streaming response from the OpenAI API"""
+        """
+        Handle a streaming response from the OpenAI API
+        
+        Args:
+            stream: The streaming response from OpenAI
+        """
         # Variables to track the current message being built
         current_content = ""
-        last_displayed_length = 0  # 跟踪上次显示的内容长度
+        last_displayed_length = 0  # Track last displayed content length
         current_tool_calls = {}
-        has_tool_calls = False  # 跟踪是否有工具调用
+        has_tool_calls = False  # Track if there are tool calls
 
         try:
             for chunk in stream:
                 if self.should_exit:
+                    print("\nResponse generation cancelled.")
                     break
 
                 delta = chunk.choices[0].delta
@@ -459,15 +455,15 @@ class TerminalChat:
                 if delta.content:
                     current_content += delta.content
 
-                    # 计算需要显示的新内容
+                    # Calculate new content to display
                     new_content = current_content[last_displayed_length:]
                     last_displayed_length = len(current_content)
 
-                    # 只有在有新内容时才更新显示
+                    # Only update display if there's new content
                     if new_content:
-                        if last_displayed_length == len(new_content):  # 第一次显示内容
+                        if last_displayed_length == len(new_content):  # First display content
                             sys.stdout.write(colored_text("Assistant: ", "bright_green") + new_content)
-                        else:  # 追加内容
+                        else:  # Append content
                             sys.stdout.write(new_content)
                         sys.stdout.flush()
 
@@ -481,6 +477,14 @@ class TerminalChat:
                                 "id": "",
                                 "function": {"name": "", "arguments": ""}
                             }
+                            # Print a newline if transitioning from content to tool calls
+                            if current_content and tc_delta.index == 0:
+                                print("\n")
+                                
+                            # Display tool call header when a new tool call is started
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_name = tc_delta.function.name
+                                print(f"\n{colored_text('Tool Call: ', 'bright_cyan')}{colored_text(tool_name, 'bright_white')}")
 
                         # Update tool call properties
                         if tc_delta.id:
@@ -490,6 +494,9 @@ class TerminalChat:
                             current_tool_calls[tc_delta.index]["function"]["name"] = tc_delta.function.name
 
                         if tc_delta.function and tc_delta.function.arguments:
+                            # Display arguments as they come in
+                            sys.stdout.write(tc_delta.function.arguments)
+                            sys.stdout.flush()
                             current_tool_calls[tc_delta.index]["function"]["arguments"] += tc_delta.function.arguments
 
             # Create the final content message if not empty
@@ -503,14 +510,12 @@ class TerminalChat:
 
             # Process tool calls
             if current_tool_calls:
-                from openai.types.chat import ChatCompletionMessageToolCall
-
                 # Convert dictionary to list
                 tool_calls_list = []
                 for idx in sorted(current_tool_calls.keys()):
                     tc = current_tool_calls[idx]
 
-                    # 创建一个工具调用对象 - 使用正确的方式创建
+                    # Create a tool call object
                     tool_call = {
                         "id": tc["id"],
                         "type": "function",
@@ -530,7 +535,7 @@ class TerminalChat:
                         "tool_calls": [tool_call]
                     })
 
-                    # 创建一个简单的对象用于执行工具调用
+                    # Create a simple object for executing tool call
                     class ToolCall:
                         def __init__(self, id, function_name, arguments):
                             self.id = id
@@ -539,13 +544,18 @@ class TerminalChat:
                                 'arguments': arguments
                             })
 
-                    # 执行工具调用
+                    # Execute tool call
                     tc_obj = ToolCall(
                         tool_call["id"],
                         tool_call["function"]["name"],
                         tool_call["function"]["arguments"]
                     )
+                    
+                    # Execute and display the result
+                    print(f"\n{colored_text('Executing tool...', 'bright_yellow')}")
                     result = self.execute_tool_call(tc_obj)
+                    print(f"\n{colored_text('Result:', 'bright_green')}")
+                    print(result)
 
                     # Add the tool call result to conversation history
                     self.conversation_history.append({
@@ -554,17 +564,19 @@ class TerminalChat:
                         "content": result
                     })
 
-                # 只有当没有内容输出，只有工具调用时，才自动发起后续对话
+                # Only auto-start subsequent conversation when there's no content output, only tool calls
                 if not current_content and has_tool_calls and not self.should_exit:
-                    # 延迟一点时间，避免用户体验突兀
+                    # Delay a bit to avoid abrupt experience
                     time.sleep(0.5)
-                    # 使用一个空消息触发后续对话，让模型回应工具调用的结果
+                    print(f"\n{colored_text('Continuing conversation based on tool results...', 'bright_blue')}")
+                    # Use an empty message to trigger subsequent conversation, let model respond to tool call results
                     self.send_message_to_model(None)
 
         except Exception as e:
-            print(f"\n{TermColor.RED}Error in stream processing: {str(e)}{TermColor.RESET}")
-            logger.exception("Error processing stream:")
+            print(f"\n{colored_text(f'Error processing response: {str(e)}', 'bright_red')}")
+            logger.exception("Error in handle_streaming_response:")
         finally:
+            # Reset loading state
             self.loading = False
             self.current_stream = None
 
@@ -575,7 +587,7 @@ class TerminalChat:
         Args:
             user_message: Optional user message to send
         """
-        # 如果已经在加载中，就不要重复发送请求
+        # If already loading, don't repeat send request
         if self.loading:
             return
 
@@ -589,7 +601,7 @@ class TerminalChat:
 
             # Set loading state
             self.loading = True
-            self.thinking_seconds = 0  # 重置思考时间计数器
+            self.thinking_seconds = 0  # Reset thinking time counter
 
             # Build system message
             system_message = {
@@ -628,17 +640,58 @@ class TerminalChat:
             self.loading = False
 
     def print_header(self):
-        """Print the terminal chat header"""
-        cwd = short_cwd()
+        """Print the application header with version and model information"""
+        header_color = TermColor.BRIGHT_CYAN
+        accent_color = TermColor.BRIGHT_GREEN
+        reset = TermColor.RESET
+        
+        # Create a boxed header
+        box_width = 60
+        border_top = f"{header_color}╭{'─' * (box_width - 1)}╮{reset}"
+        border_bottom = f"{header_color}╰{'─' * (box_width - 1)}╯{reset}"
+        
+        # Print header
+        print(border_top)
+        
+        # App name and version
+        app_name = f"{header_color}│{reset} {accent_color}Codev CLI{reset} - Interactive AI Coding Agent"
+        padding = box_width - len(app_name) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+        print(f"{app_name}{' ' * padding}{header_color}│{reset}")
+        
+        # Version info
+        version_line = f"{header_color}│{reset} Version: {CLI_VERSION}"
+        padding = box_width - len(version_line) + len(header_color) + len(reset)
+        print(f"{version_line}{' ' * padding}{header_color}│{reset}")
+        
+        # Model info
+        model_info = f"{header_color}│{reset} Model: {accent_color}{self.config.model}{reset}"
+        padding = box_width - len(model_info) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+        print(f"{model_info}{' ' * padding}{header_color}│{reset}")
+        
+        # Approval policy info
         policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
-
-        print(f"{TermColor.BRIGHT_CYAN}────────────────────────────────────────────────{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_WHITE}Codev CLI v{CLI_VERSION}{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_WHITE}Directory: {cwd}{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_WHITE}Model: {self.config.model}{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_WHITE}Approval Policy: {policy_color}{self.approval_policy}{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_CYAN}────────────────────────────────────────────────{TermColor.RESET}")
-        print(f"{TermColor.BRIGHT_BLACK}Type your message and press Enter. Use Ctrl+C or '/exit' to exit.{TermColor.RESET}")
+        policy_line = f"{header_color}│{reset} Approval Policy: {policy_color}{self.approval_policy}{reset}"
+        padding = box_width - len(policy_line) + len(header_color) + len(reset) + len(policy_color) + len(reset)
+        print(f"{policy_line}{' ' * padding}{header_color}│{reset}")
+        
+        # Working directory
+        cwd_line = f"{header_color}│{reset} Working Directory: {short_cwd()}"
+        if len(cwd_line) - len(header_color) - len(reset) > box_width - 4:
+            # Truncate if too long
+            display_cwd = short_cwd()
+            max_cwd_len = box_width - 24  # Allow space for the label and ellipsis
+            if len(display_cwd) > max_cwd_len:
+                display_cwd = "..." + display_cwd[-(max_cwd_len-3):]
+            cwd_line = f"{header_color}│{reset} Working Directory: {display_cwd}"
+        padding = box_width - len(cwd_line) + len(header_color) + len(reset)
+        print(f"{cwd_line}{' ' * padding}{header_color}│{reset}")
+        
+        # Help info
+        help_line = f"{header_color}│{reset} Type {accent_color}/help{reset} for available commands"
+        padding = box_width - len(help_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+        print(f"{help_line}{' ' * padding}{header_color}│{reset}")
+        
+        print(border_bottom)
         print()
 
     def process_initial_prompt(self):
@@ -677,6 +730,33 @@ class TerminalChat:
         # Process initial prompt if provided
         self.process_initial_prompt()
 
+        # Enable readline support (if available)
+        try:
+            import readline
+            
+            # Set basic command auto-completion
+            def completer(text, state):
+                commands = ["/help", "/model", "/approval", "/history", 
+                           "/clear", "/clearhistory", "/compact", "/exit", "/quit"]
+                options = [cmd for cmd in commands if cmd.startswith(text)]
+                if state < len(options):
+                    return options[state]
+                else:
+                    return None
+                    
+            readline.parse_and_bind("tab: complete")
+            readline.set_completer(completer)
+            
+            # Add history functionality
+            history_file = os.path.expanduser("~/.codev_history")
+            try:
+                readline.read_history_file(history_file)
+            except FileNotFoundError:
+                pass
+                
+        except ImportError:
+            logger.warning("readline module not available, some features will be limited")
+
         # Main input loop
         while not self.should_exit:
             try:
@@ -689,21 +769,24 @@ class TerminalChat:
 
                 # Get user input
                 user_input = input(f"{TermColor.BRIGHT_BLUE}You:{TermColor.RESET} ")
+                
+                # Save to readline history (if available)
+                try:
+                    readline.add_history(user_input)
+                    readline.write_history_file(history_file)
+                except (NameError, FileNotFoundError):
+                    pass
 
-                # Check for special commands
-                if user_input.lower() in ["/exit", "/quit"]:
-                    self.should_exit = True
-                    continue
-                elif user_input.lower() == "/clear":
-                    os.system("clear" if os.name == "posix" else "cls")
-                    self.print_header()
-                    continue
+                # Handle special commands using the command handler
+                if user_input.startswith("/"):
+                    if self.command_handler.handle_command(user_input):
+                        continue
 
                 # Send message to the model
                 self.send_message_to_model(user_input)
 
             except KeyboardInterrupt:
-                print("\n\nInterrupted by user.")
+                print("\n\nUser interrupted.")
                 if self.loading and self.current_stream:
                     print("Cancelling current request...")
                     # Note: The OpenAI Python library doesn't have a direct way to cancel streams
@@ -715,6 +798,6 @@ class TerminalChat:
 
             except Exception as e:
                 print(f"\n{TermColor.RED}Error: {str(e)}{TermColor.RESET}")
-                logger.exception("Error in terminal chat:")
+                logger.exception("Terminal chat error:")
 
         print("\nThank you for using Codev CLI. Goodbye!")

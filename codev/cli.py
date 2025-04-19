@@ -5,7 +5,6 @@
 """
 import sys
 import argparse
-
 from codev.terminal_chat import TerminalChat
 from codev.config import load_config
 from codev.utils.models import get_available_models

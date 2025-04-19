@@ -88,8 +88,22 @@ codev --approval-policy suggest|auto-edit|full-auto
 
 ## 聊天命令
 
-- `/exit` 或 `/quit`：退出应用程序
-- `/clear`：清除终端屏幕
+- `/help` - 显示帮助信息
+- `/model` - 在会话中切换LLM模型
+- `/approval` - 切换批准策略模式
+- `/history` - 显示会话中的命令和文件历史
+- `/clear` - 清除屏幕和上下文
+- `/clearhistory` - 清除命令历史
+- `/compact` - 将上下文压缩为摘要
+- `/exit` 或 `/quit` - 退出应用程序
+
+## 键盘快捷键
+
+- Enter - 发送消息
+- Ctrl+J - 插入换行符
+- Up/Down - 滚动提示历史记录
+- Esc(×2) - 中断当前操作
+- Ctrl+C - 退出Codev
 
 ## 配置
 

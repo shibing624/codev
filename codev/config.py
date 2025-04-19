@@ -11,7 +11,7 @@ from codev.version import __version__
 
 # Constants
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/").rstrip("/")
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-4o"
 CLI_VERSION = __version__
 
 
