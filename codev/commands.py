@@ -9,7 +9,7 @@ import enum
 import asyncio
 from loguru import logger
 
-from codev.utils.models import get_available_models
+from codev.models import get_available_models
 
 
 class ApprovalPolicy(str, enum.Enum):

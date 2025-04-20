@@ -10,11 +10,11 @@ import time
 from loguru import logger
 import json
 import subprocess
-from typing import Dict, List, Optional
+from typing import List, Optional
 from openai import OpenAI
 
 from codev.config import AppConfig, CLI_VERSION, OPENAI_BASE_URL
-from codev.utils.agent_loop import ReviewDecision, CommandConfirmation, ApplyPatchCommand
+from codev.agent_loop import ReviewDecision, CommandConfirmation, ApplyPatchCommand
 from codev.format_command import format_command_for_display
 from codev.approvals import generate_command_explanation, ApprovalPolicy
 from codev.commands import CommandHandler, TermColor, COLOR_MAP, POLICY_COLORS

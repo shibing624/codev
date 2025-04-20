@@ -64,6 +64,7 @@ class ActionType(Enum):
 
 class Chunk:
     """Represents a chunk of changes in a file patch"""
+
     def __init__(self, orig_index: int, del_lines: List[str], ins_lines: List[str]):
         self.orig_index = orig_index
         self.del_lines = del_lines
@@ -72,8 +73,9 @@ class Chunk:
 
 class PatchAction:
     """Represents an action to be performed on a file"""
-    def __init__(self, action_type: ActionType, new_file: Optional[str] = None, 
-                move_path: Optional[str] = None):
+
+    def __init__(self, action_type: ActionType, new_file: Optional[str] = None,
+                 move_path: Optional[str] = None):
         self.type = action_type
         self.new_file = new_file
         self.chunks = []
@@ -82,6 +84,7 @@ class PatchAction:
 
 class Patch:
     """Represents a collection of patch actions to be applied"""
+
     def __init__(self):
         self.actions = {}
 
@@ -96,6 +99,7 @@ class Parser:
     Parser for patches that converts patch text into structured operations
     Based on the TypeScript implementation for consistency
     """
+
     def __init__(self, current_files: Dict[str, str], lines: List[str]):
         """
         Initialize the parser
@@ -127,7 +131,7 @@ class Parser:
         """Read a string from the current line with optional prefix"""
         if self.index >= len(self.lines):
             raise DiffError(f"Index: {self.index} >= {len(self.lines)}")
-        
+
         if self.lines[self.index].startswith(prefix):
             text = self.lines[self.index] if return_everything else self.lines[self.index][len(prefix):]
             self.index += 1
@@ -143,39 +147,39 @@ class Parser:
                     raise DiffError(f"Update File Error: Duplicate Path: {path}")
                 if path not in self.current_files:
                     raise DiffError(f"Update File Error: Missing File: {path}")
-                
+
                 move_to = self.read_str(MOVE_FILE_TO_PREFIX)
                 text = self.current_files[path]
                 action = self.parse_update_file(text)
                 action.move_path = move_to if move_to else None
                 self.patch.actions[path] = action
                 continue
-            
+
             path = self.read_str(DELETE_FILE_PREFIX)
             if path:
                 if path in self.patch.actions:
                     raise DiffError(f"Delete File Error: Duplicate Path: {path}")
                 if path not in self.current_files:
                     raise DiffError(f"Delete File Error: Missing File: {path}")
-                
+
                 self.patch.actions[path] = PatchAction(ActionType.DELETE)
                 continue
-            
+
             path = self.read_str(ADD_FILE_PREFIX)
             if path:
                 if path in self.patch.actions:
                     raise DiffError(f"Add File Error: Duplicate Path: {path}")
                 if path in self.current_files:
                     raise DiffError(f"Add File Error: File already exists: {path}")
-                
+
                 self.patch.actions[path] = self.parse_add_file()
                 continue
-            
+
             raise DiffError(f"Unknown Line: {self.lines[self.index]}")
-        
+
         if not self.startswith(PATCH_SUFFIX.strip()):
             raise DiffError("Missing End Patch")
-        
+
         self.index += 1
 
     def parse_update_file(self, text: str) -> PatchAction:
@@ -183,7 +187,7 @@ class Parser:
         action = PatchAction(ActionType.UPDATE)
         file_lines = text.split("\n")
         index = 0
-        
+
         while not self.is_done([
             PATCH_SUFFIX,
             UPDATE_FILE_PREFIX,
@@ -193,14 +197,14 @@ class Parser:
         ]):
             def_str = self.read_str("@@ ")
             section_str = ""
-            
+
             if not def_str and self.lines[self.index] == "@@":
                 section_str = self.lines[self.index]
                 self.index += 1
-            
+
             if not (def_str or section_str or index == 0):
                 raise DiffError(f"Invalid Line:\n{self.lines[self.index]}")
-            
+
             if def_str.strip():
                 found = False
                 if not any(s == def_str for s in file_lines[:index]):
@@ -209,7 +213,7 @@ class Parser:
                             index = i + 1
                             found = True
                             break
-                
+
                 if not found and not any(s.strip() == def_str.strip() for s in file_lines[:index]):
                     for i in range(index, len(file_lines)):
                         if file_lines[i].strip() == def_str.strip():
@@ -217,25 +221,25 @@ class Parser:
                             self.fuzz += 1
                             found = True
                             break
-            
+
             next_chunk_context, chunks, end_patch_index, eof = self.peek_next_section(self.lines, self.index)
             new_index, fuzz = self.find_context(file_lines, next_chunk_context, index, eof)
-            
+
             if new_index == -1:
                 ctx_text = "\n".join(next_chunk_context)
                 if eof:
                     raise DiffError(f"Invalid EOF Context {index}:\n{ctx_text}")
                 else:
                     raise DiffError(f"Invalid Context {index}:\n{ctx_text}")
-            
+
             self.fuzz += fuzz
             for ch in chunks:
                 ch.orig_index += new_index
                 action.chunks.append(ch)
-            
+
             index = new_index + len(next_chunk_context)
             self.index = end_patch_index
-        
+
         return action
 
     def parse_add_file(self) -> PatchAction:
@@ -251,7 +255,7 @@ class Parser:
             if not s.startswith(HUNK_ADD_LINE_PREFIX):
                 raise DiffError(f"Invalid Add File Line: {s}")
             lines.append(s[1:])
-        
+
         return PatchAction(ActionType.ADD, new_file="\n".join(lines))
 
     @staticmethod
@@ -259,19 +263,19 @@ class Parser:
         """Find context in lines starting from start position"""
         if not context:
             return start, 0
-        
+
         for i in range(start, len(lines)):
             if "\n".join(lines[i:i + len(context)]) == "\n".join(context):
                 return i, 0
-        
+
         for i in range(start, len(lines)):
             if "\n".join([s.rstrip() for s in lines[i:i + len(context)]]) == "\n".join([s.rstrip() for s in context]):
                 return i, 1
-        
+
         for i in range(start, len(lines)):
             if "\n".join([s.strip() for s in lines[i:i + len(context)]]) == "\n".join([s.strip() for s in context]):
                 return i, 100
-        
+
         return -1, 0
 
     @staticmethod
@@ -281,10 +285,10 @@ class Parser:
             new_index, fuzz = Parser.find_context_core(lines, context, len(lines) - len(context))
             if new_index != -1:
                 return new_index, fuzz
-            
+
             new_index, fuzz = Parser.find_context_core(lines, context, start)
             return new_index, fuzz + 10000
-        
+
         return Parser.find_context_core(lines, context, start)
 
     @staticmethod
@@ -296,7 +300,7 @@ class Parser:
         ins_lines = []
         chunks = []
         mode = "keep"
-        
+
         while index < len(lines):
             s = lines[index]
             if any(s.startswith(p.strip()) for p in [
@@ -308,17 +312,17 @@ class Parser:
                 END_OF_FILE_PREFIX,
             ]):
                 break
-            
+
             if s == "***":
                 break
-            
+
             if s.startswith("***"):
                 raise DiffError(f"Invalid Line: {s}")
-            
+
             index += 1
             last_mode = mode
             line = s
-            
+
             if line[0] == HUNK_ADD_LINE_PREFIX:
                 mode = "add"
             elif line[0] == "-":
@@ -329,14 +333,14 @@ class Parser:
                 # Tolerate invalid lines missing leading whitespace
                 mode = "keep"
                 line = " " + line
-            
+
             line = line[1:]
             if mode == "keep" and last_mode != mode:
                 if ins_lines or del_lines:
                     chunks.append(Chunk(len(old) - len(del_lines), del_lines.copy(), ins_lines.copy()))
                 del_lines = []
                 ins_lines = []
-            
+
             if mode == "delete":
                 del_lines.append(line)
                 old.append(line)
@@ -344,28 +348,28 @@ class Parser:
                 ins_lines.append(line)
             else:
                 old.append(line)
-        
+
         if ins_lines or del_lines:
             chunks.append(Chunk(len(old) - len(del_lines), del_lines.copy(), ins_lines.copy()))
-        
+
         if index < len(lines) and lines[index] == END_OF_FILE_PREFIX:
             index += 1
             return old, chunks, index, True
-        
+
         return old, chunks, index, False
 
 
 def write_file(p: str, content: str) -> None:
     """Write content to a file, creating directories as needed"""
     import os.path
-    
+
     if os.path.isabs(p):
         raise DiffError("We do not support absolute paths.")
-    
+
     parent = os.path.dirname(p)
     if parent != ".":
         os.makedirs(parent, exist_ok=True)
-    
+
     with open(p, "w", encoding="utf-8") as f:
         f.write(content)
 
@@ -382,16 +386,18 @@ class AgentLoop:
     Handles sending messages, receiving responses, and processing tool calls.
     """
 
-    def __init__(self,
-                model: str,
-                config: AppConfig,
-                instructions: Optional[str] = None,
-                approval_policy: str = "suggest",
-                additional_writable_roots: List[str] = None,
-                on_item: Callable[[Dict[str, Any]], None] = None,
-                on_loading: Callable[[bool], None] = None,
-                on_last_response_id: Callable[[Optional[str]], None] = None,
-                get_command_confirmation: Optional[Callable] = None):
+    def __init__(
+            self,
+            model: str,
+            config: AppConfig,
+            instructions: Optional[str] = None,
+            approval_policy: str = "suggest",
+            additional_writable_roots: List[str] = None,
+            on_item: Callable[[Dict[str, Any]], None] = None,
+            on_loading: Callable[[bool], None] = None,
+            on_last_response_id: Callable[[Optional[str]], None] = None,
+            get_command_confirmation: Optional[Callable] = None
+    ):
         """
         Initialize the agent loop
         
@@ -429,7 +435,7 @@ class AgentLoop:
         self.current_stream = None
         # Session ID for tracking
         self.session_id = self._generate_session_id()
-        
+
         # Initialize OpenAI client
         self.client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
@@ -457,7 +463,7 @@ class AgentLoop:
             "role": "system",
             "content": content
         })
-        
+
         # Print the system message to terminal
         print(f"\n[System] {content}")
 
@@ -521,7 +527,7 @@ class AgentLoop:
             "role": "user",
             "content": message_content if images else content
         })
-        
+
         # Print user message to terminal
         print(f"\n[User] {content}")
         if images:
@@ -548,7 +554,7 @@ class AgentLoop:
 
         # Print tool call to terminal
         print(f"\n[Tool Call] Function: {function_name}")
-        
+
         # Parse arguments
         try:
             args = json.loads(function_arguments)
@@ -575,16 +581,16 @@ class AgentLoop:
             command = args.get("command", "")
             is_background = args.get("is_background", False)
             workdir = args.get("workdir", None)
-            
+
             # Prepare command for execution
             cmd_list = command if isinstance(command, list) else command.split()
-            
+
             # Check if we need to confirm
             if self.approval_policy != "full-auto" and self.get_command_confirmation:
                 print("\n[Approval] Requesting command confirmation...")
                 try:
                     confirmation = await self.get_command_confirmation(cmd_list, None)
-                    
+
                     if confirmation.review != ReviewDecision.APPROVE:
                         deny_message = confirmation.custom_deny_message or "Command not approved by user"
                         print(f"[Denied] {deny_message}")
@@ -597,18 +603,18 @@ class AgentLoop:
                     logger.error(error_msg)
                     output_item["output"] = f"Error confirming command: {str(e)}"
                     return [output_item]
-            
+
             # Execute the command
             try:
                 import subprocess
-                
+
                 print(f"\n[Executing] {'(Background) ' if is_background else ''}{command}")
                 if workdir:
                     print(f"[Working Directory] {workdir}")
-                
+
                 # Create a new abort controller for this execution
                 self.exec_abort_controller = asyncio.create_task(self._create_abort_controller())
-                
+
                 if is_background:
                     # Run in background
                     process = subprocess.Popen(
@@ -628,14 +634,14 @@ class AgentLoop:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )
-                    
+
                     try:
                         print("[Waiting] Command execution in progress...")
                         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
                         exit_code = process.returncode
                         stdout_text = stdout.decode('utf-8', errors='replace')
                         stderr_text = stderr.decode('utf-8', errors='replace')
-                        
+
                         output_text = stdout_text
                         if exit_code != 0 and stderr_text:
                             output_text += f"\nError (code {exit_code}): {stderr_text}"
@@ -643,7 +649,7 @@ class AgentLoop:
                             print(f"[Error] {stderr_text}")
                         else:
                             print(f"[Success] Command completed (Exit Code: {exit_code})")
-                        
+
                         # Print up to 20 lines of stdout to the terminal
                         lines = stdout_text.splitlines()
                         if lines:
@@ -663,7 +669,7 @@ class AgentLoop:
                         except:
                             pass
                         output_text = "Command execution timed out after 300 seconds"
-                
+
                 output_item["output"] = json.dumps({
                     "output": output_text,
                     "metadata": {
@@ -671,7 +677,7 @@ class AgentLoop:
                         "duration_seconds": 0 if is_background else 300
                     }
                 })
-                
+
             except Exception as e:
                 error_msg = f"Error executing command: {str(e)}"
                 print(f"[Error] {error_msg}")
@@ -680,37 +686,37 @@ class AgentLoop:
                     "output": f"Error executing command: {str(e)}",
                     "metadata": {"exit_code": 1}
                 })
-            
+
             finally:
                 # Clear the abort controller
                 self.exec_abort_controller = None
-                
+
         elif function_name == "edit_file":
             target_file = args.get("target_file", "")
             code_edit = args.get("code_edit", "")
-            
+
             print(f"\n[Edit File] {target_file}")
-            
+
             # Check if this is a patch operation
             is_patch = code_edit.startswith(PATCH_PREFIX) and code_edit.endswith(PATCH_SUFFIX)
             if is_patch:
                 print("[Patch] Processing patch operation")
             else:
                 print("[Direct Edit] Writing file directly")
-            
+
             # Create apply patch command
             apply_patch = ApplyPatchCommand(
                 file_path=target_file,
                 content=code_edit,
                 patch=code_edit if is_patch else None
             )
-            
+
             # Check if we need to confirm
             if self.approval_policy != "full-auto" and self.approval_policy != "auto-edit" and self.get_command_confirmation:
                 print("\n[Approval] Requesting file edit confirmation...")
                 try:
                     confirmation = await self.get_command_confirmation(["edit", target_file], apply_patch)
-                    
+
                     if confirmation.review != ReviewDecision.APPROVE:
                         deny_message = confirmation.custom_deny_message or "File edit not approved by user"
                         print(f"[Denied] {deny_message}")
@@ -723,7 +729,7 @@ class AgentLoop:
                     logger.error(error_msg)
                     output_item["output"] = f"Error confirming file edit: {str(e)}"
                     return [output_item]
-            
+
             # Apply the edit
             try:
                 if is_patch:
@@ -739,11 +745,11 @@ class AgentLoop:
                     # Direct file edit
                     # Create directory if it doesn't exist
                     os.makedirs(os.path.dirname(os.path.abspath(target_file)), exist_ok=True)
-                    
+
                     # Write the file
                     with open(target_file, "w", encoding="utf-8") as f:
                         f.write(code_edit)
-                    
+
                     success_msg = f"Successfully wrote to {target_file}"
                     print(f"[Success] {success_msg}")
                     output_item["output"] = success_msg
@@ -752,14 +758,14 @@ class AgentLoop:
                 print(f"[Error] {error_msg}")
                 logger.error(error_msg)
                 output_item["output"] = f"Error editing file: {str(e)}"
-        
+
         return [output_item]
 
     async def _create_abort_controller(self):
         """Create an abort controller that can be used to cancel operations"""
         controller = asyncio.Event()
         return controller
-        
+
     async def run(self, input_items: List[Dict[str, Any]], last_response_id: str = None):
         """
         Run the agent loop with the given input items
@@ -775,7 +781,7 @@ class AgentLoop:
 
         self.is_running = True
         self.should_cancel = False
-        
+
         # Increment generation to ignore stray events
         self.generation += 1
         this_generation = self.generation
@@ -804,7 +810,7 @@ class AgentLoop:
         # Update loading state
         if self.on_loading:
             self.on_loading(True)
-        
+
         print("\n[Agent] Processing request...")
 
         try:
@@ -828,7 +834,7 @@ class AgentLoop:
 
             # Prepare messages for the OpenAI API
             messages = [system_message] + self.conversation_history
-            
+
             print(f"\n[Model] Using {self.model}")
             print(f"[Policy] Approval Policy: {self.approval_policy}")
 
@@ -886,12 +892,12 @@ class AgentLoop:
             message_id = f"assistant-{time.time()}"
             accumulated_message = ""
             last_sent_message = ""  # Track the last message sent to prevent duplicates
-            
+
             print("\n[Processing] Sending request to model...")
 
             # Prepare for retry in case of API errors
             MAX_RETRIES = 2
-            
+
             for attempt in range(MAX_RETRIES):
                 try:
                     # Make streaming request using OpenAI's Python client
@@ -907,7 +913,7 @@ class AgentLoop:
                         frequency_penalty=0,
                         presence_penalty=0
                     )
-                    
+
                     # Process the streaming response
                     tool_calls = []
                     print("\n[Response]")
@@ -916,7 +922,7 @@ class AgentLoop:
                         if self.should_cancel or this_generation != self.generation:
                             print("[Canceled] Response generation canceled")
                             break
-                            
+
                         # Extract content if present
                         delta = chunk.choices[0].delta
 
@@ -969,9 +975,9 @@ class AgentLoop:
                                 if tc_delta.function and tc_delta.function.arguments:
                                     tool_calls[tc_index]["function"]["arguments"] += tc_delta.function.arguments
                                     print(tc_delta.function.arguments, end="", flush=True)
-                    
+
                     print("\n")  # Add newline after response
-                    
+
                     # Add the final response to conversation history
                     if accumulated_message:
                         # Add assistant message to conversation history for continuity
@@ -989,10 +995,10 @@ class AgentLoop:
                                 "content": None,
                                 "tool_calls": [tool_call]
                             })
-                            
+
                             # Process the tool call
                             results = await self.handle_function_call(tool_call)
-                            
+
                             for result in results:
                                 # Add the tool call result to conversation history
                                 self.conversation_history.append({
@@ -1000,7 +1006,7 @@ class AgentLoop:
                                     "tool_call_id": tool_call["id"],
                                     "content": result["output"]
                                 })
-                                
+
                                 # Create a result item to show the output
                                 tool_result_item = {
                                     "id": f"tool-result-{time.time()}",
@@ -1008,30 +1014,30 @@ class AgentLoop:
                                     "tool_call_id": tool_call["id"],
                                     "content": result["output"]
                                 }
-                                
+
                                 if self.on_item:
                                     self.on_item(tool_result_item)
-                    
+
                     # If we reached here, break the retry loop
                     break
-                
+
                 except OpenAIError as e:
                     if attempt < MAX_RETRIES - 1:
-                        print(f"\n[Retry] OpenAI request timed out (attempt {attempt+1}/{MAX_RETRIES}), retrying...")
-                        logger.warning(f"OpenAI request timed out (attempt {attempt+1}/{MAX_RETRIES}), retrying...")
+                        print(f"\n[Retry] OpenAI request timed out (attempt {attempt + 1}/{MAX_RETRIES}), retrying...")
+                        logger.warning(f"OpenAI request timed out (attempt {attempt + 1}/{MAX_RETRIES}), retrying...")
                         await asyncio.sleep(1)  # Wait briefly before retrying
                     else:
                         print("\n[Error] Max retries reached for OpenAI API timeout")
                         logger.error("Max retries reached for OpenAI API timeout")
                         self.add_system_message("Error: OpenAI API timed out after multiple attempts.")
-                        
+
                 except Exception as e:
                     error_msg = f"Error in agent loop: {str(e)}"
                     print(f"\n[Error] {error_msg}")
                     logger.error(error_msg)
                     if attempt < MAX_RETRIES - 1 and isinstance(e, (ConnectionError, TimeoutError)):
-                        print(f"[Retry] Connection error, retrying (attempt {attempt+1}/{MAX_RETRIES})...")
-                        logger.warning(f"Connection error, retrying (attempt {attempt+1}/{MAX_RETRIES})...")
+                        print(f"[Retry] Connection error, retrying (attempt {attempt + 1}/{MAX_RETRIES})...")
+                        logger.warning(f"Connection error, retrying (attempt {attempt + 1}/{MAX_RETRIES})...")
                         await asyncio.sleep(1)
                     else:
                         self.add_system_message(f"Error: {str(e)}")
@@ -1064,7 +1070,7 @@ class AgentLoop:
         print("\n[Cancel] Canceling current operation...")
         self.should_cancel = True
         self.generation += 1  # Increment to ignore ongoing events
-        
+
         # Cancel the current stream if possible
         if self.current_stream:
             try:
@@ -1074,7 +1080,7 @@ class AgentLoop:
                 pass
             except:
                 pass
-        
+
         # Cancel any running tool executions
         if self.exec_abort_controller:
             try:
@@ -1082,7 +1088,7 @@ class AgentLoop:
                 self.exec_abort_controller.set()
             except:
                 pass
-        
+
         print("[Cancel] Operation canceled")
 
     def terminate(self):
@@ -1107,10 +1113,10 @@ def text_to_patch(text: str, orig: Dict[str, str]) -> Tuple[Patch, int]:
     """
     lines = text.strip().split("\n")
     if (len(lines) < 2 or
-        not (lines[0] or "").startswith(PATCH_PREFIX.strip()) or
-        lines[-1] != PATCH_SUFFIX.strip()):
+            not (lines[0] or "").startswith(PATCH_PREFIX.strip()) or
+            lines[-1] != PATCH_SUFFIX.strip()):
         raise DiffError("Invalid patch text")
-    
+
     parser = Parser(orig, lines)
     parser.index = 1
     parser.parse()
@@ -1129,13 +1135,13 @@ def identify_files_needed(text: str) -> List[str]:
     """
     lines = text.strip().split("\n")
     result = set()
-    
+
     for line in lines:
         if line.startswith(UPDATE_FILE_PREFIX):
             result.add(line[len(UPDATE_FILE_PREFIX):])
         if line.startswith(DELETE_FILE_PREFIX):
             result.add(line[len(DELETE_FILE_PREFIX):])
-    
+
     return list(result)
 
 
@@ -1151,11 +1157,11 @@ def identify_files_added(text: str) -> List[str]:
     """
     lines = text.strip().split("\n")
     result = set()
-    
+
     for line in lines:
         if line.startswith(ADD_FILE_PREFIX):
             result.add(line[len(ADD_FILE_PREFIX):])
-    
+
     return list(result)
 
 
@@ -1173,32 +1179,32 @@ def get_updated_file(text: str, action: PatchAction, path: str) -> str:
     """
     if action.type != ActionType.UPDATE:
         raise ValueError("Expected UPDATE action")
-    
+
     orig_lines = text.split("\n")
     dest_lines = []
     orig_index = 0
-    
+
     for chunk in action.chunks:
         if chunk.orig_index > len(orig_lines):
             raise DiffError(
                 f"{path}: chunk.orig_index {chunk.orig_index} > len(lines) {len(orig_lines)}"
             )
-        
+
         if orig_index > chunk.orig_index:
             raise DiffError(
                 f"{path}: orig_index {orig_index} > chunk.orig_index {chunk.orig_index}"
             )
-        
+
         dest_lines.extend(orig_lines[orig_index:chunk.orig_index])
         delta = chunk.orig_index - orig_index
         orig_index += delta
-        
+
         # Add inserted lines
         if chunk.ins_lines:
             dest_lines.extend(chunk.ins_lines)
-        
+
         orig_index += len(chunk.del_lines)
-    
+
     dest_lines.extend(orig_lines[orig_index:])
     return "\n".join(dest_lines)
 
@@ -1215,7 +1221,7 @@ def patch_to_commit(patch: Patch, orig: Dict[str, str]) -> Dict[str, Dict]:
         Dictionary representing changes to apply
     """
     commit = {"changes": {}}
-    
+
     for path_key, action in patch.actions.items():
         if action.type == ActionType.DELETE:
             commit["changes"][path_key] = {
@@ -1235,7 +1241,7 @@ def patch_to_commit(patch: Patch, orig: Dict[str, str]) -> Dict[str, Dict]:
                 "new_content": new_content,
                 "move_path": action.move_path
             }
-    
+
     return commit
 
 
@@ -1257,11 +1263,11 @@ def load_files(paths: List[str], open_fn: Callable[[str], str]) -> Dict[str, str
         except Exception:
             # Convert any file read error to DiffError
             raise DiffError(f"File not found: {p}")
-    
+
     return orig
 
 
-def apply_commit(commit: Dict[str, Dict], write_fn: Callable[[str, str], None], 
+def apply_commit(commit: Dict[str, Dict], write_fn: Callable[[str, str], None],
                  remove_fn: Callable[[str], None]) -> None:
     """
     Apply changes in a commit
@@ -1284,9 +1290,9 @@ def apply_commit(commit: Dict[str, Dict], write_fn: Callable[[str, str], None],
                 write_fn(p, change.get("new_content", ""))
 
 
-def process_patch(text: str, open_fn: Callable[[str], str], 
-                 write_fn: Callable[[str, str], None], 
-                 remove_fn: Callable[[str], None]) -> str:
+def process_patch(text: str, open_fn: Callable[[str], str],
+                  write_fn: Callable[[str, str], None],
+                  remove_fn: Callable[[str], None]) -> str:
     """
     Process a patch and apply it to the filesystem
     
@@ -1301,13 +1307,13 @@ def process_patch(text: str, open_fn: Callable[[str], str],
     """
     if not text.startswith(PATCH_PREFIX):
         raise DiffError("Patch must start with *** Begin Patch\\n")
-    
+
     paths = identify_files_needed(text)
     orig = load_files(paths, open_fn)
     patch, _ = text_to_patch(text, orig)
     commit = patch_to_commit(patch, orig)
     apply_commit(commit, write_fn, remove_fn)
-    
+
     print("Successfully applied patch")
     return "Successfully applied patch"
 
@@ -1322,13 +1328,13 @@ def open_file(p: str) -> str:
 def write_file(p: str, content: str) -> None:
     """Write content to a file, creating directories as needed"""
     import os.path
-    
+
     if os.path.isabs(p):
         raise DiffError("We do not support absolute paths.")
-    
+
     parent = os.path.dirname(p)
     if parent != ".":
         os.makedirs(parent, exist_ok=True)
-    
+
     with open(p, "w", encoding="utf-8") as f:
         f.write(content)

@@ -81,7 +81,7 @@ class HistoryManager:
                     self.command_history = data.get('commands', [])
                     self.file_edit_history = data.get('files', [])
                 
-                logger.info(f"History records loaded: {len(self.command_history)} commands, "
+                logger.debug(f"History records loaded: {len(self.command_history)} commands, "
                            f"{len(self.file_edit_history)} file edits")
                 
                 # Create a backup when loading (ensures we have a backup even if the file gets corrupted)
