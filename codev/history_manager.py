@@ -134,8 +134,7 @@ class HistoryManager:
                     'commands': self.command_history,
                     'files': self.file_edit_history
                 }, f, ensure_ascii=False, indent=2)
-            logger.debug(f"History records saved to {self.history_file}")
-            
+
             # Create periodic backup (every 10 saves)
             if hash(str(self.command_history) + str(self.file_edit_history)) % 10 == 0:
                 self.create_backup()

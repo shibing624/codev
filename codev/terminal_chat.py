@@ -566,9 +566,7 @@ class TerminalChat:
 
                 # Only auto-start subsequent conversation when there's no content output, only tool calls
                 if not current_content and has_tool_calls and not self.should_exit:
-                    # Delay a bit to avoid abrupt experience
-                    time.sleep(0.5)
-                    print(f"\n{colored_text('Continuing conversation based on tool results...', 'bright_blue')}")
+                    time.sleep(0.2)
                     # Use an empty message to trigger subsequent conversation, let model respond to tool call results
                     self.send_message_to_model(None)
 

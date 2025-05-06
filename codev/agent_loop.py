@@ -359,27 +359,6 @@ class Parser:
         return old, chunks, index, False
 
 
-def write_file(p: str, content: str) -> None:
-    """Write content to a file, creating directories as needed"""
-    import os.path
-
-    if os.path.isabs(p):
-        raise DiffError("We do not support absolute paths.")
-
-    parent = os.path.dirname(p)
-    if parent != ".":
-        os.makedirs(parent, exist_ok=True)
-
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(content)
-
-
-def remove_file(p: str) -> None:
-    """Remove a file"""
-    import os
-    os.unlink(p)
-
-
 class AgentLoop:
     """
     Manages the interaction loop with the AI agent.
@@ -766,7 +745,7 @@ class AgentLoop:
         controller = asyncio.Event()
         return controller
 
-    async def run(self, input_items: List[Dict[str, Any]], last_response_id: str = None):
+    async def run(self, input_items: List[Dict[str, Any]]):
         """
         Run the agent loop with the given input items
         
@@ -815,7 +794,7 @@ class AgentLoop:
 
         try:
             # Check if API key is set
-            api_key = os.environ.get("OPENAI_API_KEY")
+            api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 self.add_system_message("Error: OPENAI_API_KEY environment variable not set")
                 return
@@ -1023,20 +1002,16 @@ class AgentLoop:
 
                 except OpenAIError as e:
                     if attempt < MAX_RETRIES - 1:
-                        print(f"\n[Retry] OpenAI request timed out (attempt {attempt + 1}/{MAX_RETRIES}), retrying...")
                         logger.warning(f"OpenAI request timed out (attempt {attempt + 1}/{MAX_RETRIES}), retrying...")
                         await asyncio.sleep(1)  # Wait briefly before retrying
                     else:
-                        print("\n[Error] Max retries reached for OpenAI API timeout")
                         logger.error("Max retries reached for OpenAI API timeout")
                         self.add_system_message("Error: OpenAI API timed out after multiple attempts.")
 
                 except Exception as e:
                     error_msg = f"Error in agent loop: {str(e)}"
-                    print(f"\n[Error] {error_msg}")
                     logger.error(error_msg)
                     if attempt < MAX_RETRIES - 1 and isinstance(e, (ConnectionError, TimeoutError)):
-                        print(f"[Retry] Connection error, retrying (attempt {attempt + 1}/{MAX_RETRIES})...")
                         logger.warning(f"Connection error, retrying (attempt {attempt + 1}/{MAX_RETRIES})...")
                         await asyncio.sleep(1)
                     else:
@@ -1338,3 +1313,8 @@ def write_file(p: str, content: str) -> None:
 
     with open(p, "w", encoding="utf-8") as f:
         f.write(content)
+
+def remove_file(p: str) -> None:
+    """Remove a file"""
+    import os
+    os.unlink(p)
