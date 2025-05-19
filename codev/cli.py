@@ -1,68 +1,57 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: CLI entry point for the application
 """
+import os
 import sys
 import argparse
-from codev.terminal_chat import TerminalChat
-from codev.config import load_config
-from codev.models import get_available_models
+from loguru import logger
+
+from codev.config import AppConfig, load_config, CLI_VERSION
+from codev.terminal_chat import run_terminal_chat
+from codev.approvals import ApprovalPolicy
 
 
 def main():
-    """
-    Main entry point for the CLI application
-    """
-    parser = argparse.ArgumentParser(description="CLI - A command-line interface for code generation with AI")
-    parser.add_argument("--model", type=str, help="The model to use for generation")
-    parser.add_argument("--prompt", type=str, help="Initial prompt to send to the model")
-    parser.add_argument("--image", action="append", help="Image file paths to include with the prompt")
-    parser.add_argument("--approval-policy", type=str, choices=["suggest", "auto-edit", "full-auto"],
-                        default="suggest", help="Approval policy for commands")
-    parser.add_argument("--writable", action="append", help="Additional writable directories")
-    parser.add_argument("--full-stdout", action="store_true", help="Show full stdout for commands")
-    parser.add_argument("--notify", action="store_true", help="Enable desktop notifications")
-    parser.add_argument("--config", type=str, help="Path to config file")
+    """Main entry point for the CLI"""
+    parser = argparse.ArgumentParser(description="Codev CLI - AI-powered coding assistant")
+    parser.add_argument("--prompt", "-p", type=str, help="Initial prompt to send to the model")
+    parser.add_argument("--model", "-m", type=str, help="Model to use (e.g., gpt-4o, gpt-4-turbo)")
+    parser.add_argument("--config", "-c", type=str, help="Path to configuration file")
+    parser.add_argument("--image", "-i", action='append', help="Path to image file to include with the prompt (can be used multiple times)")
+    parser.add_argument("--approval", "-a", type=str, choices=["suggest", "auto-edit", "full-auto"], 
+                      default="suggest", help="Approval policy for commands")
+    parser.add_argument("--full-stdout", "-f", action="store_true", help="Show full command output")
+    parser.add_argument("--version", "-v", action="store_true", help="Show version information")
 
     args = parser.parse_args()
 
-    # Load the configuration
-    config_path = args.config
-    config = load_config(config_path)
+    # Show version and exit if requested
+    if args.version:
+        print(f"Codev CLI v{CLI_VERSION}")
+        sys.exit(0)
 
-    # Override config with command line arguments
+    # Configure logging
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    logger.add(os.path.expanduser("~/.codev/codev.log"), rotation="10 MB", level="DEBUG")
+
+    # Load configuration
+    config = load_config(args.config)
+
+    # Override model if specified
     if args.model:
         config.model = args.model
-    if args.notify:
-        config.notify = True
 
-    # Verify model availability - but don't block execution if this fails
-    try:
-        available_models = get_available_models()
-        if available_models and config.model not in available_models:
-            print(f"Warning: model '{config.model}' is not in the list of available models returned by OpenAI.")
-    except Exception as e:
-        print(f"Warning: Failed to retrieve available models: {str(e)}")
-
-    # Set up additional writable roots
-    additional_writable_roots = args.writable or []
-
-    # Initialize and run the terminal chat
-    terminal = TerminalChat(
+    # Run terminal chat
+    run_terminal_chat(
         config=config,
         prompt=args.prompt,
         image_paths=args.image,
-        approval_policy=args.approval_policy or "suggest",
-        additional_writable_roots=additional_writable_roots,
+        approval_policy=args.approval,
         full_stdout=args.full_stdout
     )
-
-    try:
-        terminal.run()
-    except KeyboardInterrupt:
-        print("\nExiting Codev CLI...")
-        sys.exit(0)
 
 
 if __name__ == "__main__":

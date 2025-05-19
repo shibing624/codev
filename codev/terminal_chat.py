@@ -7,14 +7,13 @@
 import os
 import sys
 import time
+import asyncio
 from loguru import logger
 import json
-import subprocess
 from typing import List, Optional
-from openai import OpenAI
 
-from codev.config import AppConfig, CLI_VERSION, OPENAI_BASE_URL
-from codev.agent_loop import ReviewDecision, CommandConfirmation, ApplyPatchCommand
+from codev.config import AppConfig, CLI_VERSION
+from codev.agent import ReviewDecision, CommandConfirmation, ApplyPatchCommand, CodevAgent
 from codev.format_command import format_command_for_display
 from codev.approvals import generate_command_explanation, ApprovalPolicy
 from codev.commands import CommandHandler, TermColor, COLOR_MAP, POLICY_COLORS
@@ -52,7 +51,7 @@ def short_cwd() -> str:
 
 class TerminalChat:
     """
-    Terminal-based chat interface for interacting with the AI assistant using OpenAI's Chat Completions API
+    Terminal-based chat interface for interacting with the AI assistant using agentica's Agent
     """
 
     def __init__(
@@ -71,7 +70,7 @@ class TerminalChat:
             config: Application configuration
             prompt: Initial prompt to send to the model
             image_paths: Paths to images to include with the prompt
-            approval_policy: Approval policy for commands
+            approval_policy: Approval policy for commands, 'auto-edit', 'full-auto', or 'suggest'
             additional_writable_roots: Additional writable directories
             full_stdout: Whether to show full command output
         """
@@ -82,71 +81,60 @@ class TerminalChat:
         self.additional_writable_roots = additional_writable_roots or []
         self.full_stdout = full_stdout
 
-        self.conversation_history = []
         self.command_history = []
         self.file_edit_history = []
         self.loading = False
         self.thinking_seconds = 0
         self.should_exit = False
-        self.current_stream = None
-        
+
         # Initialize history manager
         self.history_manager = HistoryManager()
-        
+
         # Initialize command handler
         self.command_handler = CommandHandler(self)
 
-        # Initialize OpenAI client
-        self.client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=OPENAI_BASE_URL
+        # Initialize CodevAgent
+        self.agent = CodevAgent(
+            config=self.config,
+            approval_policy=self.approval_policy,
+            additional_writable_roots=self.additional_writable_roots,
+            on_message=self.handle_agent_message,
+            on_loading=self.handle_loading_state,
+            get_command_confirmation=self.get_command_confirmation,
+            history_manager=self.history_manager
         )
 
-        # Define tools for the OpenAI API
-        self.tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "run_terminal_cmd",
-                    "description": "Run a terminal command on the user's system",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "command": {
-                                "type": "string",
-                                "description": "The terminal command to execute"
-                            },
-                            "is_background": {
-                                "type": "boolean",
-                                "description": "Whether the command should be run in the background"
-                            }
-                        },
-                        "required": ["command"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "edit_file",
-                    "description": "Edit a file or create a new one",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "target_file": {
-                                "type": "string",
-                                "description": "The path of the file to edit"
-                            },
-                            "code_edit": {
-                                "type": "string",
-                                "description": "The new content for the file"
-                            }
-                        },
-                        "required": ["target_file", "code_edit"]
-                    }
-                }
-            }
-        ]
+    def handle_agent_message(self, message):
+        """
+        Handle messages from the agent
+        
+        Args:
+            message: The message from the agent
+        """
+        role = message.get("role", "")
+        content = message.get("content", "")
+
+        if role == "assistant":
+            print(f"{colored_text('Assistant: ', 'bright_green')}{content}")
+        elif role == "system":
+            print(f"{colored_text('System: ', 'yellow')}{content}")
+        elif role == "error":
+            print(f"{colored_text('Error: ', 'bright_red')}{content}")
+
+    def handle_loading_state(self, is_loading: bool):
+        """
+        Handle loading state changes
+        
+        Args:
+            is_loading: Whether the agent is loading
+        """
+        self.loading = is_loading
+        if is_loading:
+            self.thinking_seconds = 0
+        else:
+            # Clear the thinking indicator
+            sys.stdout.write("\r" + " " * 20 + "\r")
+            sys.stdout.flush()
 
     def get_command_confirmation(self, command: List[str],
                                  apply_patch: Optional[ApplyPatchCommand]) -> CommandConfirmation:
@@ -235,443 +223,64 @@ class TerminalChat:
             explanation=explanation
         )
 
-    def execute_tool_call(self, tool_call):
+    def show_thinking_indicator(self):
+        """Show a thinking indicator while waiting for a response"""
+        dots = "." * (self.thinking_seconds % 4)
+        sys.stdout.write(f"\rThinking{dots}    ")
+        sys.stdout.flush()
+
+    async def send_message_to_agent(self, user_message=None):
         """
-        Execute a tool call from the AI
-        
-        Args:
-            tool_call: The tool call to execute
-            
-        Returns:
-            Result of the tool execution
-        """
-        function_name = tool_call.function.name
-        function_args = json.loads(tool_call.function.arguments)
-
-        if function_name == "run_terminal_cmd":
-            command = function_args.get("command", "")
-            is_background = function_args.get("is_background", False)
-            
-            # Add command to in-memory history
-            self.command_history.append(command)
-            
-            # Format command for display
-            formatted_command = format_command_for_display(command)
-
-            # Generate command explanation
-            explanation = generate_command_explanation(command, self.config.model)
-
-            # Determine if user confirmation is needed
-            requires_approval = self.approval_policy != "full-auto"
-            if self.approval_policy == "auto-edit":
-                # In auto-edit mode, only shell commands need confirmation
-                requires_approval = True
-
-            if requires_approval:
-                # Display command and request confirmation
-                policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
-                policy_name = self.approval_policy.upper()
-                print(f"\n{policy_color}[{policy_name}]{TermColor.RESET} {TermColor.CYAN}Recommended command:{TermColor.RESET}")
-                print(f"{TermColor.BRIGHT_WHITE}{formatted_command}{TermColor.RESET}")
-                
-                if explanation:
-                    print(f"{TermColor.YELLOW}Explanation: {explanation}{TermColor.RESET}")
-                
-                print("\nExecute this command? (y/n)")
-                decision = input("> ").strip().lower()
-                
-                if decision != "y":
-                    return "User cancelled the command execution."
-
-            # Execute command
-            print(f"\n{TermColor.GREEN}Executing command:{TermColor.RESET} {formatted_command}\n")
-            
-            try:
-                if is_background:
-                    # Run in background
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                    result = f"Command started in the background, Command: `{command}`, PID: {process.pid}"
-                    # Record to history manager
-                    self.history_manager.add_command(command, True, result)
-                    return result
-                else:
-                    # Capture output
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                    stdout, stderr = process.communicate()
-                    
-                    # Determine output based on full_stdout setting
-                    if self.full_stdout or len(stdout) < 1000:
-                        output = stdout
-                    else:
-                        # If output is too long, truncate display
-                        lines = stdout.split("\n")
-                        if len(lines) > 15:
-                            output = "\n".join(lines[:15])
-                            output += f"\n... (truncated, total {len(lines)} lines)"
-                        else:
-                            output = stdout
-                    
-                    # If there are errors, include stderr
-                    if process.returncode != 0 and stderr:
-                        output += f"\nError: {stderr}"
-                        
-                    # Record to history manager
-                    success = process.returncode == 0
-                    self.history_manager.add_command(command, success, output)
-                    
-                    return output or "Command executed successfully (no output)"
-            except Exception as e:
-                error_msg = f"Error executing command: {str(e)}"
-                # Record to history manager
-                self.history_manager.add_command(command, False, error_msg)
-                return error_msg
-
-        elif function_name == "edit_file":
-            target_file = function_args.get("target_file", "")
-            code_edit = function_args.get("code_edit", "")
-            
-            # Add file edit to in-memory history
-            self.file_edit_history.append(target_file)
-            
-            # Determine if user confirmation is required
-            requires_approval = self.approval_policy == "suggest"
-            
-            if requires_approval:
-                # Display edit and request confirmation
-                policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
-                policy_name = self.approval_policy.upper()
-                print(f"\n{policy_color}[{policy_name}]{TermColor.RESET} {TermColor.CYAN}Recommended file edit:{TermColor.RESET}")
-                print(f"{TermColor.BRIGHT_WHITE}File: {target_file}{TermColor.RESET}")
-                
-                # Show edit preview
-                print(f"\nPreview:")
-                max_lines = 15
-                lines = code_edit.split("\n")
-                preview = "\n".join(lines[:max_lines])
-                if len(lines) > max_lines:
-                    preview += f"\n... (truncated, total {len(lines)} lines)"
-                print(f"{TermColor.BRIGHT_WHITE}{preview}{TermColor.RESET}")
-                
-                print("\nApply this edit? (y/n)")
-                decision = input("> ").strip().lower()
-                
-                if decision != "y":
-                    return "User cancelled the file edit."
-            
-            # Apply edit
-            try:
-                # Ensure directory exists
-                os.makedirs(os.path.dirname(os.path.abspath(target_file)), exist_ok=True)
-                
-                # Write to file
-                with open(target_file, "w") as f:
-                    f.write(code_edit)
-                
-                # Determine operation type (create or edit)
-                operation = "create" if not os.path.exists(target_file) else "edit"
-                
-                # Record to history manager
-                self.history_manager.add_file_edit(target_file, operation)
-                
-                return f"Successfully edited file: {target_file}"
-            except Exception as e:
-                error_msg = f"Error editing file: {str(e)}"
-                # TODO: Consider recording failed edit attempts
-                return error_msg
-        
-        return "Unsupported tool call."
-
-    def handle_ai_message(self, message):
-        """Display AI message and handle any tool calls"""
-        if message.content:
-            print(f"{colored_text('Assistant: ', 'bright_green')}{message.content}")
-
-            # Add to conversation history
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": message.content
-            })
-
-        # Handle any tool calls
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                # Add the tool call to conversation history
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.function.name,
-                            "arguments": tool_call.function.arguments
-                        }
-                    }]
-                })
-
-                # Execute the tool call
-                result = self.execute_tool_call(tool_call)
-
-                # Add the tool call result to conversation history
-                self.conversation_history.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result
-                })
-
-    def handle_streaming_response(self, stream):
-        """
-        Handle a streaming response from the OpenAI API
-        
-        Args:
-            stream: The streaming response from OpenAI
-        """
-        # Variables to track the current message being built
-        current_content = ""
-        last_displayed_length = 0  # Track last displayed content length
-        current_tool_calls = {}
-        has_tool_calls = False  # Track if there are tool calls
-
-        try:
-            for chunk in stream:
-                if self.should_exit:
-                    print("\nResponse generation cancelled.")
-                    break
-
-                delta = chunk.choices[0].delta
-
-                # Handle content updates
-                if delta.content:
-                    current_content += delta.content
-
-                    # Calculate new content to display
-                    new_content = current_content[last_displayed_length:]
-                    last_displayed_length = len(current_content)
-
-                    # Only update display if there's new content
-                    if new_content:
-                        if last_displayed_length == len(new_content):  # First display content
-                            sys.stdout.write(colored_text("Assistant: ", "bright_green") + new_content)
-                        else:  # Append content
-                            sys.stdout.write(new_content)
-                        sys.stdout.flush()
-
-                # Handle tool call updates
-                if delta.tool_calls:
-                    has_tool_calls = True
-                    for tc_delta in delta.tool_calls:
-                        # Create tool call if it doesn't exist
-                        if tc_delta.index not in current_tool_calls:
-                            current_tool_calls[tc_delta.index] = {
-                                "id": "",
-                                "function": {"name": "", "arguments": ""}
-                            }
-                            # Print a newline if transitioning from content to tool calls
-                            if current_content and tc_delta.index == 0:
-                                print("\n")
-                                
-                            # Display tool call header when a new tool call is started
-                            if tc_delta.function and tc_delta.function.name:
-                                tool_name = tc_delta.function.name
-                                print(f"\n{colored_text('Tool Call: ', 'bright_cyan')}{colored_text(tool_name, 'bright_white')}")
-
-                        # Update tool call properties
-                        if tc_delta.id:
-                            current_tool_calls[tc_delta.index]["id"] = tc_delta.id
-
-                        if tc_delta.function and tc_delta.function.name:
-                            current_tool_calls[tc_delta.index]["function"]["name"] = tc_delta.function.name
-
-                        if tc_delta.function and tc_delta.function.arguments:
-                            # Display arguments as they come in
-                            sys.stdout.write(tc_delta.function.arguments)
-                            sys.stdout.flush()
-                            current_tool_calls[tc_delta.index]["function"]["arguments"] += tc_delta.function.arguments
-
-            # Create the final content message if not empty
-            if current_content:
-                print()  # Add newline after streaming
-                # Add to conversation history
-                self.conversation_history.append({
-                    "role": "assistant",
-                    "content": current_content
-                })
-
-            # Process tool calls
-            if current_tool_calls:
-                # Convert dictionary to list
-                tool_calls_list = []
-                for idx in sorted(current_tool_calls.keys()):
-                    tc = current_tool_calls[idx]
-
-                    # Create a tool call object
-                    tool_call = {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"]
-                        }
-                    }
-                    tool_calls_list.append(tool_call)
-
-                # Process each tool call
-                for tool_call in tool_calls_list:
-                    # Add the tool call to conversation history
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tool_call]
-                    })
-
-                    # Create a simple object for executing tool call
-                    class ToolCall:
-                        def __init__(self, id, function_name, arguments):
-                            self.id = id
-                            self.function = type('obj', (object,), {
-                                'name': function_name,
-                                'arguments': arguments
-                            })
-
-                    # Execute tool call
-                    tc_obj = ToolCall(
-                        tool_call["id"],
-                        tool_call["function"]["name"],
-                        tool_call["function"]["arguments"]
-                    )
-                    
-                    # Execute and display the result
-                    print(f"\n{colored_text('Executing tool...', 'bright_yellow')}")
-                    result = self.execute_tool_call(tc_obj)
-                    print(f"\n{colored_text('Result:', 'bright_green')}")
-                    print(result)
-
-                    # Add the tool call result to conversation history
-                    self.conversation_history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": result
-                    })
-
-                # Only auto-start subsequent conversation when there's no content output, only tool calls
-                if not current_content and has_tool_calls and not self.should_exit:
-                    time.sleep(0.2)
-                    # Use an empty message to trigger subsequent conversation, let model respond to tool call results
-                    self.send_message_to_model(None)
-
-        except Exception as e:
-            print(f"\n{colored_text(f'Error processing response: {str(e)}', 'bright_red')}")
-            logger.exception("Error in handle_streaming_response:")
-        finally:
-            # Reset loading state
-            self.loading = False
-            self.current_stream = None
-
-    def send_message_to_model(self, user_message=None):
-        """
-        Send a message to the OpenAI model
+        Send a message to the agent
         
         Args:
             user_message: Optional user message to send
         """
-        # If already loading, don't repeat send request
-        if self.loading:
-            return
+        if user_message:
+            print(f"{colored_text('You: ', 'bright_blue')}{user_message}")
 
-        try:
-            # Add user message to conversation history if provided
-            if user_message:
-                self.conversation_history.append({
-                    "role": "user",
-                    "content": user_message
-                })
+        # Send message to agent
+        self.agent.send_message(user_message, self.initial_image_paths if user_message == self.initial_prompt else None)
 
-            # Set loading state
-            self.loading = True
-            self.thinking_seconds = 0  # Reset thinking time counter
-
-            # Build system message
-            system_message = {
-                "role": "system",
-                "content": "You are a powerful coding assistant that helps users with programming tasks."
-            }
-
-            if self.config.instructions:
-                system_message["content"] += f" {self.config.instructions}"
-
-            # Add information about approval policy
-            system_message["content"] += f" The current approval policy is set to '{self.approval_policy}'."
-
-            # Prepare messages for the API
-            messages = [system_message] + self.conversation_history
-
-            # Create streaming request
-            self.current_stream = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                tools=self.tools,
-                stream=True,
-                max_tokens=4000,
-                temperature=0.7,
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0
-            )
-
-            # Handle the streaming response
-            self.handle_streaming_response(self.current_stream)
-
-        except Exception as e:
-            print(f"\n{TermColor.RED}Error: {str(e)}{TermColor.RESET}")
-            logger.exception("Error sending message to model:")
-            self.loading = False
+        # Clear initial image paths after first use
+        if user_message == self.initial_prompt:
+            self.initial_image_paths = []
 
     def print_header(self):
         """Print the application header with version and model information"""
         header_color = TermColor.BRIGHT_CYAN
         accent_color = TermColor.BRIGHT_GREEN
         reset = TermColor.RESET
-        
+
         # Create a boxed header
         box_width = 60
         border_top = f"{header_color}╭{'─' * (box_width - 1)}╮{reset}"
         border_bottom = f"{header_color}╰{'─' * (box_width - 1)}╯{reset}"
-        
+
         # Print header
         print(border_top)
-        
+
         # App name and version
         app_name = f"{header_color}│{reset} {accent_color}Codev CLI{reset} - Interactive AI Coding Agent"
         padding = box_width - len(app_name) + len(header_color) + len(reset) + len(accent_color) + len(reset)
         print(f"{app_name}{' ' * padding}{header_color}│{reset}")
-        
+
         # Version info
         version_line = f"{header_color}│{reset} Version: {CLI_VERSION}"
         padding = box_width - len(version_line) + len(header_color) + len(reset)
         print(f"{version_line}{' ' * padding}{header_color}│{reset}")
-        
+
         # Model info
         model_info = f"{header_color}│{reset} Model: {accent_color}{self.config.model}{reset}"
         padding = box_width - len(model_info) + len(header_color) + len(reset) + len(accent_color) + len(reset)
         print(f"{model_info}{' ' * padding}{header_color}│{reset}")
-        
+
         # Approval policy info
         policy_color = POLICY_COLORS.get(self.approval_policy, TermColor.WHITE)
         policy_line = f"{header_color}│{reset} Approval Policy: {policy_color}{self.approval_policy}{reset}"
         padding = box_width - len(policy_line) + len(header_color) + len(reset) + len(policy_color) + len(reset)
         print(f"{policy_line}{' ' * padding}{header_color}│{reset}")
-        
+
         # Working directory
         cwd_line = f"{header_color}│{reset} Working Directory: {short_cwd()}"
         if len(cwd_line) - len(header_color) - len(reset) > box_width - 4:
@@ -679,79 +288,65 @@ class TerminalChat:
             display_cwd = short_cwd()
             max_cwd_len = box_width - 24  # Allow space for the label and ellipsis
             if len(display_cwd) > max_cwd_len:
-                display_cwd = "..." + display_cwd[-(max_cwd_len-3):]
+                display_cwd = "..." + display_cwd[-(max_cwd_len - 3):]
             cwd_line = f"{header_color}│{reset} Working Directory: {display_cwd}"
         padding = box_width - len(cwd_line) + len(header_color) + len(reset)
         print(f"{cwd_line}{' ' * padding}{header_color}│{reset}")
-        
+
         # Help info
         help_line = f"{header_color}│{reset} Type {accent_color}/help{reset} for available commands"
         padding = box_width - len(help_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
         print(f"{help_line}{' ' * padding}{header_color}│{reset}")
-        
+
         print(border_bottom)
         print()
 
-    def process_initial_prompt(self):
+    async def process_initial_prompt(self):
         """Process the initial prompt if provided"""
         if self.initial_prompt or self.initial_image_paths:
-            content = []
+            content = self.initial_prompt or ""
 
-            # Handle text prompt
-            if self.initial_prompt:
-                content = self.initial_prompt
-                print(f"{colored_text('You: ', 'bright_blue')}{self.initial_prompt}")
-
-            # Handle images (would need to be implemented differently with OpenAI API)
+            # Handle images
             if self.initial_image_paths:
                 image_paths_str = ", ".join(self.initial_image_paths)
                 print(f"{colored_text('You: ', 'bright_blue')}[Images attached: {image_paths_str}]")
-                # Note: For now, we'll just mention the images in the prompt
-                if content:
-                    content += f"\n[User included images: {image_paths_str}]"
-                else:
-                    content = f"[User included images: {image_paths_str}]"
+                if not content:
+                    content = "[Please analyze these images]"
 
-            # Send to model
-            self.send_message_to_model(content)
+            # Send to agent
+            await self.send_message_to_agent(content)
 
-    def show_thinking_indicator(self):
-        """Show a thinking indicator while waiting for a response"""
-        dots = "." * (self.thinking_seconds % 4)
-        sys.stdout.write(f"\rThinking{dots}    ")
-        sys.stdout.flush()
-
-    def run(self):
+    async def run(self):
         """Run the terminal chat interface"""
         self.print_header()
 
         # Process initial prompt if provided
-        self.process_initial_prompt()
+        await self.process_initial_prompt()
 
         # Enable readline support (if available)
         try:
             import readline
-            
+
             # Set basic command auto-completion
             def completer(text, state):
-                commands = ["/help", "/model", "/approval", "/history", 
-                           "/clear", "/clearhistory", "/compact", "/exit", "/quit"]
+                commands = ["/help", "/model", "/approval", "/history",
+                            "/clear", "/clearhistory", "/compact", "/exit", "/quit"]
                 options = [cmd for cmd in commands if cmd.startswith(text)]
                 if state < len(options):
                     return options[state]
                 else:
                     return None
-                    
+
             readline.parse_and_bind("tab: complete")
             readline.set_completer(completer)
-            
+
             # Add history functionality
             history_file = os.path.expanduser("~/.codev_history")
             try:
                 readline.read_history_file(history_file)
             except FileNotFoundError:
                 pass
-                
+
         except ImportError:
             logger.warning("readline module not available, some features will be limited")
 
@@ -762,12 +357,12 @@ class TerminalChat:
                 if self.loading:
                     self.show_thinking_indicator()
                     self.thinking_seconds += 1
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     continue
 
                 # Get user input
                 user_input = input(f"{TermColor.BRIGHT_BLUE}You:{TermColor.RESET} ")
-                
+
                 # Save to readline history (if available)
                 try:
                     readline.add_history(user_input)
@@ -780,16 +375,14 @@ class TerminalChat:
                     if self.command_handler.handle_command(user_input):
                         continue
 
-                # Send message to the model
-                self.send_message_to_model(user_input)
+                # Send message to the agent
+                await self.send_message_to_agent(user_input)
 
             except KeyboardInterrupt:
                 print("\n\nUser interrupted.")
-                if self.loading and self.current_stream:
+                if self.loading:
                     print("Cancelling current request...")
-                    # Note: The OpenAI Python library doesn't have a direct way to cancel streams
-                    # We'll set our flags to stop processing
-                    self.loading = False
+                    self.agent.cancel()
                 else:
                     print("Exiting...")
                     self.should_exit = True
@@ -799,3 +392,30 @@ class TerminalChat:
                 logger.exception("Terminal chat error:")
 
         print("\nThank you for using Codev CLI. Goodbye!")
+
+
+# Helper function to run the terminal chat asynchronously
+def run_terminal_chat(config=AppConfig(), prompt=None, image_paths=None,
+                      approval_policy="suggest", additional_writable_roots=None,
+                      full_stdout=False):
+    """Run the terminal chat interface"""
+    terminal = TerminalChat(
+        config=config,
+        prompt=prompt,
+        image_paths=image_paths,
+        approval_policy=approval_policy,
+        additional_writable_roots=additional_writable_roots,
+        full_stdout=full_stdout
+    )
+
+    # Run the terminal chat asynchronously
+    asyncio.run(terminal.run())
+
+
+if __name__ == '__main__':
+    # Example usage
+    run_terminal_chat(
+        config=AppConfig(),
+        prompt="写一个快排的python脚本，保存为b.py",
+        approval_policy="full-auto",
+    )
