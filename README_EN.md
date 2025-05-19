@@ -8,7 +8,7 @@
 
 -----------------
 
-# CodeV: Coding Agent That Runs in Your Terminal
+# Codev: Coding Agent That Runs in Your Terminal
 [![PyPI version](https://badge.fury.io/py/pycodev.svg)](https://badge.fury.io/py/pycodev)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -18,7 +18,7 @@
 
 ## Introduction
 
-CodeV is a command-line interface for AI-powered code generation. This Python implementation provides an interactive coding assistant in your terminal, leveraging the OpenAI Chat Completions API to help you write, edit, and execute code more efficiently.
+Codev is a command-line interface for AI-powered code generation. This Python implementation provides an interactive coding assistant in your terminal, leveraging the OpenAI Chat Completions API to help you write, edit, and execute code more efficiently.
 
 ## Features
 
@@ -143,13 +143,13 @@ If you use `codev` in your research, please cite:
 
 APA:
 ```
-Xu, M. CodeV: coding agent that runs in your terminal (Version 0.0.2) [Computer software]. https://github.com/shibing624/codev
+Xu, M. Codev: coding agent that runs in your terminal (Version 0.0.2) [Computer software]. https://github.com/shibing624/codev
 ```
 
 BibTeX:
 ```
 @misc{Xu_codev,
-  title={CodeV: coding agent that runs in your terminal},
+  title={Codev: coding agent that runs in your terminal},
   author={Xu Ming},
   year={2025},
   howpublished={\url{https://github.com/shibing624/codev}},
