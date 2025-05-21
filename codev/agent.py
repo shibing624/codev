@@ -51,7 +51,6 @@ class CodevAgent:
             self,
             config: 'AppConfig',
             approval_policy: str = "auto-edit",
-            on_message: Callable[[Dict[str, Any]], None] = None,
             on_loading: Callable[[bool], None] = None,
             get_command_confirmation: Optional[Callable] = None,
             history_manager=None,
@@ -64,8 +63,6 @@ class CodevAgent:
         Args:
             config: The application configuration
             approval_policy: The approval policy to use, 'auto-edit', 'full-auto', or 'suggest'
-            on_message: Callback for when a message is received
-            on_loading: Callback for when the loading state changes
             get_command_confirmation: Callback to request confirmation for commands
             history_manager: Manager for conversation history
             instructions: Instructions for the agent
@@ -74,8 +71,6 @@ class CodevAgent:
         self.config = config
         self.model = config.model  # Store model from config for easy access
         self.approval_policy = approval_policy
-        self.on_message = on_message
-        self.on_loading = on_loading
         self.get_command_confirmation = get_command_confirmation
         self.history_manager = history_manager
 
@@ -99,6 +94,7 @@ class CodevAgent:
             model=OpenAIChat(id=self.config.model),
             system_prompt=system_message,
             instructions=instructions,
+            add_history_to_messages=True,
             tools=[self.shell_tool.execute_command, self.file_tool.write, self.file_tool.read, self.file_tool.delete],
             show_tool_calls=debug,
             debug=debug,
@@ -319,20 +315,22 @@ class CodevAgent:
         """Generate a unique session ID"""
         return f"session_{int(time.time())}"
 
-    def send_message(self, user_message: str):
+    def send_message(self, user_message: str, stream: bool = False):
         """
         Send a message to the agent and handle the response
         
         Args:
             user_message: The user's message
+            stream: Whether to stream the response
+            
+        Returns:
+            If stream=True, returns an iterator of response chunks
+            If stream=False, returns the complete response
         """
-        if self.on_loading:
-            self.on_loading(True)
-        response = self.agent.run(user_message)
-        if self.on_message:
-            self.on_message({"role": "assistant", "content": response.content})
-        if self.on_loading:
-            self.on_loading(False)
+        if not user_message:
+            return None
+        return self.agent.run(user_message, stream=stream)
+            
 
     def cancel(self):
         """

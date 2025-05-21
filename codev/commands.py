@@ -136,10 +136,7 @@ class CommandHandler:
 │ /compact – Compress conversation context to summary                          │
 │                                                                              │
 │ Keyboard Shortcuts                                                           │
-│ Enter – Send message                                                         │
-│ Ctrl+J – Insert line break                                                   │
-│ Up/Down – Scroll through prompt history                                      │
-│ Esc(×2) – Interrupt current operation                                        │
+│ Enter+Enter – Send message                                                         │
 │ Ctrl+C – Exit Codev                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 """

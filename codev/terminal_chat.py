@@ -6,6 +6,7 @@
 
 import os
 import sys
+import time
 from loguru import logger
 from typing import List, Optional, Dict, Any, Callable
 
@@ -79,7 +80,7 @@ class TerminalChat:
         self.command_history = []
         self.file_edit_history = []
         self.loading = False
-        self.thinking_seconds = 0
+        self.thinking_start_time = 0
         self.should_exit = False
         self._input_history = []  # Initialize input history
 
@@ -90,8 +91,6 @@ class TerminalChat:
         self.agent = CodevAgent(
             config=self.config,
             approval_policy=self.approval_policy,
-            on_message=self.handle_agent_message,
-            on_loading=self.handle_loading_state,
             get_command_confirmation=self.get_command_confirmation,
             history_manager=self.history_manager,
             instructions=self.config.instructions,
@@ -99,7 +98,7 @@ class TerminalChat:
         )
         # Initialize command handler
         self.command_handler = CommandHandler(self)
-        
+
     def handle_agent_message(self, message):
         """
         Handle messages from the agent
@@ -127,10 +126,12 @@ class TerminalChat:
         """
         self.loading = is_loading
         if is_loading:
-            self.thinking_seconds = 0
+            self.thinking_start_time = time.time()
+            sys.stdout.write("\rThinking...")
+            sys.stdout.flush()
         else:
             # Clear the thinking indicator
-            sys.stdout.write("\r" + " " * 20 + "\r")
+            sys.stdout.write("\r" + " " * 30 + "\r")
             sys.stdout.flush()
 
     def get_command_confirmation(self, command: List[str],
@@ -221,25 +222,44 @@ class TerminalChat:
         )
 
     def show_thinking_indicator(self):
-        """Show a thinking indicator while waiting for a response"""
-        dots = "." * (self.thinking_seconds % 4)
-        sys.stdout.write(f"\rThinking{dots}    ")
-        sys.stdout.flush()
+        """Show a thinking indicator with elapsed time while waiting for a response"""
+        if self.loading:
+            elapsed = int(time.time() - self.thinking_start_time)
+            sys.stdout.write(f"\rThinking... ({elapsed}s)")
+            sys.stdout.flush()
 
-    def send_message_to_agent(self, user_message=None):
+    def send_message_to_agent(self, user_message=None, stream=True):
         """
-        Send a message to the agent
+        Send a message to the agent and handle streaming response
         
         Args:
             user_message: Optional user message to send
+            stream: Whether to stream the response
         """
         if user_message == self.initial_prompt:
             self.initial_image_paths = []
-            # Don't print "You:" prefix
-            print(f"\n{user_message}")
 
-        # Send message to agent
-        self.agent.send_message(user_message)
+        self.handle_loading_state(True)
+        response = self.agent.send_message(user_message, stream=stream)
+        if stream:
+            # Stream the response
+            has_content = False
+            for chunk in response:
+                if chunk and chunk.content:
+                    # First chunk received, clear thinking indicator
+                    if self.loading:
+                        self.handle_loading_state(False)
+                    print(chunk.content, end="", flush=True)
+                    has_content = True
+
+            # Print final newline if we had content
+            if has_content:
+                print("")
+        else:
+            # Non-streaming response
+            self.handle_loading_state(False)
+            if response and response.content:
+                print(response.content)
 
     def print_header(self):
         """Print the application header with version and model information"""
@@ -292,12 +312,12 @@ class TerminalChat:
         help_line = f"{header_color}│{reset} Type {accent_color}/help{reset} for available commands"
         padding = box_width - len(help_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
         print(f"{help_line}{' ' * padding}{header_color}│{reset}")
-        
+
         # Input instructions
         input_line = f"{header_color}│{reset} Input with {accent_color}>{reset} prompt, press {accent_color}Enter twice{reset} to submit"
         padding = box_width - len(input_line) + len(header_color) + len(reset) + 2 * len(accent_color) + 2 * len(reset)
         print(f"{input_line}{' ' * padding}{header_color}│{reset}")
-        
+
         print(border_bottom)
         print()
 
@@ -309,7 +329,7 @@ class TerminalChat:
             # Handle images
             if self.initial_image_paths:
                 image_paths_str = ", ".join(self.initial_image_paths)
-                print(f"{colored_text('You: ', 'bright_blue')}[Images attached: {image_paths_str}]")
+                print(f"{colored_text('> ', 'bright_blue')}[Images attached: {image_paths_str}]")
                 if not content:
                     content = "[Please analyze these images]"
 
@@ -324,6 +344,7 @@ class TerminalChat:
         self.process_initial_prompt()
 
         # Enable readline support (if available)
+        history_file = os.path.expanduser("~/.codev/chat_history.log")
         try:
             # Set basic command auto-completion
             def completer(text, state):
@@ -338,8 +359,6 @@ class TerminalChat:
             readline.parse_and_bind("tab: complete")
             readline.set_completer(completer)
 
-            # Add history functionality
-            history_file = os.path.expanduser("~/.codev/chat_history")
             try:
                 readline.read_history_file(history_file)
             except FileNotFoundError:
@@ -354,27 +373,25 @@ class TerminalChat:
                 # If we're loading, show thinking indicator
                 if self.loading:
                     self.show_thinking_indicator()
-                    self.thinking_seconds += 1
                     continue
 
                 # Get user input
                 user_input = self.get_user_input()
-
-                # Check if user wants to exit
                 if user_input is None:
-                    print("\nExiting...")
-                    self.should_exit = True
                     continue
+
                 # Save to readline history (if available)
                 try:
                     readline.add_history(user_input)
                     readline.write_history_file(history_file)
                 except (NameError, FileNotFoundError):
                     pass
+
                 # Handle special commands using the command handler
                 if user_input.startswith("/"):
                     if self.command_handler.handle_command(user_input):
                         continue
+
                 # Send message to the agent
                 self.send_message_to_agent(user_input)
             except KeyboardInterrupt:
@@ -393,32 +410,38 @@ class TerminalChat:
 
     def get_user_input(self):
         """
-        Get user input with support for multi-line editing
+        Get user input with support for multi-line editing.
+        Input ends when user enters a single empty line.
         
         Returns:
             User input string, or None if user wants to exit
         """
         try:
-            # Display prompt - just use ">" instead of "You:"
+            # Display prompt
             print("> ", end="", flush=True)
-            
-            # Get input using the simple multi-line method
-            user_input = self._get_simple_input()
-            
-            if user_input is None:
-                return None
-                
+            # Get input lines until termination condition
+            lines = []
+            while True:
+                line = input()
+                # Check if the line is empty - termination condition
+                if not line.strip():
+                    # Single empty line means we're done
+                    break
+                lines.append(line)
+
+            # If no valid input, return None
+            if not lines or not any(line.strip() for line in lines):
+                print("Empty input, please try again.")
+                return self.get_user_input()
+
+            user_input = '\n'.join(lines)
+            user_input = user_input.strip()
             # Check if user wants to exit
-            if user_input.strip() in ['\\q', 'exit', 'quit']:
+            if user_input in ['\\q', 'exit', 'quit']:
                 print("\nExiting...")
                 self.should_exit = True
                 return None
-            
-            # Handle empty input
-            if not user_input.strip():
-                print("Empty input, please try again.")
-                return self.get_user_input()
-                
+
             # Save to history
             self._save_to_input_history(user_input)
             return user_input
@@ -435,54 +458,7 @@ class TerminalChat:
             print("\nExiting...")
             self.should_exit = True
             return None
-            
-    def _get_simple_input(self):
-        """
-        Get multi-line user input with improved code paste support
-        
-        This method implements a simple but effective multi-line input system:
-        1. First line is entered directly with the ">" prompt
-        2. Subsequent lines are collected without additional prompts
-        3. Input is terminated when the user enters two empty lines in a row
-        4. Code pasting is supported naturally - each line is treated as a separate input
-        
-        Returns:
-            User input string or None if canceled
-        """
-        lines = []
-        empty_line_count = 0
-        
-        # Get input lines until termination condition
-        while True:
-            try:
-                # For the first line, prompt is already displayed in get_user_input
-                # For subsequent lines, don't show any prompt to avoid confusion with pasted code
-                if lines:
-                    line = input()
-                else:
-                    line = input()
-                
-                # Check if the line is empty
-                if not line.strip():
-                    empty_line_count += 1
-                    # Two consecutive empty lines means we're done
-                    if empty_line_count >= 1:
-                        break
-                else:
-                    empty_line_count = 0
-                # Add the line to our buffer
-                lines.append(line)
-            except KeyboardInterrupt:
-                print("\nInput canceled.")
-                return None
-        # If no valid input, return None
-        if not any(line.strip() for line in lines):
-            print("Empty input, please try again.")
-            return self.get_user_input()
-        # Join lines
-        user_input = '\n'.join(lines)
-        return user_input.strip()
-        
+
     def _save_to_input_history(self, user_input):
         """
         Save input to history

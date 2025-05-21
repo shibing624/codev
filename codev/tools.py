@@ -84,7 +84,7 @@ class ShellTool:
                     except:
                         pass
                     result = "Command execution timed out or error occurred"
-            logger.info(f"Command output: `{result}`")
+            logger.info(f"Command output: \n```{result}```")
             return result
         except Exception as e:
             error_msg = f"Error executing command: {str(e)}"
