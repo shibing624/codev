@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import threading
+import readline
 from loguru import logger
 from typing import List, Optional
 
@@ -84,6 +85,8 @@ class TerminalChat:
         self.should_exit = False
         self._input_history = []  # Initialize input history
         self._indicator_thread = None  # Thread for thinking indicator
+        self._paused_thinking = False  # Flag to pause thinking indicator
+        self._pause_start_time = 0  # Time when thinking was paused
 
         # Initialize history manager
         self.history_manager = HistoryManager()
@@ -128,11 +131,14 @@ class TerminalChat:
         self.loading = is_loading
         if is_loading:
             self.thinking_start_time = time.time()
+            self._paused_thinking = False
+            self._pause_start_time = 0
 
             # Start the thinking indicator thread
             def update_indicator():
                 while self.loading:
-                    self.show_thinking_indicator()
+                    if not self._paused_thinking:
+                        self.show_thinking_indicator()
                     time.sleep(1)  # Update every second
 
             self._indicator_thread = threading.Thread(target=update_indicator)
@@ -147,6 +153,30 @@ class TerminalChat:
                 self._indicator_thread.join(timeout=0.1)
                 self._indicator_thread = None
 
+    def pause_thinking(self):
+        """Pause the thinking indicator and remember the elapsed time"""
+        if self.loading:
+            self._paused_thinking = True
+            self._pause_start_time = time.time()
+            # Clear the thinking indicator
+            sys.stdout.write("\r" + " " * 30 + "\r")
+            sys.stdout.flush()
+
+    def resume_thinking(self):
+        """Resume the thinking indicator, adjusting for the paused time"""
+        if self.loading and self._paused_thinking:
+            pause_duration = time.time() - self._pause_start_time
+            self.thinking_start_time += pause_duration
+            self._paused_thinking = False
+            self._pause_start_time = 0
+
+    def show_thinking_indicator(self):
+        """Show a thinking indicator with elapsed time while waiting for a response"""
+        if self.loading and not self._paused_thinking:
+            elapsed = int(time.time() - self.thinking_start_time)
+            sys.stdout.write(f"\rThinking... ({elapsed}s)")
+            sys.stdout.flush()
+
     def get_command_confirmation(self, command: List[str],
                                  apply_patch: Optional[ApplyPatchCommand]) -> CommandConfirmation:
         """
@@ -159,87 +189,87 @@ class TerminalChat:
         Returns:
             CommandConfirmation with user's decision
         """
-        # Display the command for confirmation
-        command_str = format_command_for_display(command)
+        # Pause thinking indicator before showing confirmation dialog
+        self.pause_thinking()
 
-        if apply_patch:
-            print(f"\n{TermColor.YELLOW}The AI assistant wants to edit file: {apply_patch.file_path}{TermColor.RESET}")
-            print(f"{TermColor.YELLOW}Preview of changes:{TermColor.RESET}")
-            print(f"{TermColor.CYAN}```{TermColor.RESET}")
-            lines = apply_patch.content.split('\n')
-            # Only show first 10 lines if too long
-            if len(lines) > 10:
-                print('\n'.join(lines[:10]))
-                print(f"... and {len(lines) - 10} more lines")
+        try:
+            # Display the command for confirmation
+            command_str = format_command_for_display(command)
+
+            if apply_patch:
+                print(f"\n{TermColor.YELLOW}The AI assistant wants to edit file: {apply_patch.file_path}{TermColor.RESET}")
+                print(f"{TermColor.YELLOW}Preview of changes:{TermColor.RESET}")
+                print(f"{TermColor.CYAN}```{TermColor.RESET}")
+                lines = apply_patch.content.split('\n')
+                # Only show first 10 lines if too long
+                if len(lines) > 10:
+                    print('\n'.join(lines[:10]))
+                    print(f"... and {len(lines) - 10} more lines")
+                else:
+                    print(apply_patch.content)
+                print(f"{TermColor.CYAN}```{TermColor.RESET}")
             else:
-                print(apply_patch.content)
-            print(f"{TermColor.CYAN}```{TermColor.RESET}")
-        else:
-            print(f"\n{TermColor.YELLOW}The AI assistant wants to run: {command_str}{TermColor.RESET}")
+                print(f"\n{TermColor.YELLOW}The AI assistant wants to run: {command_str}{TermColor.RESET}")
 
-        print("\nOptions:")
-        print(f"  {TermColor.GREEN}(a)pprove{TermColor.RESET} - Execute the command")
-        print(f"  {TermColor.RED}(d)eny{TermColor.RESET} - Reject the command")
-        print(f"  {TermColor.BLUE}(e)xplain{TermColor.RESET} - Ask for an explanation")
-        print(f"  {TermColor.MAGENTA}(m)odify{TermColor.RESET} - Modify the command before running")
-
-        decision = ""
-        while decision not in ["a", "d", "e", "m"]:
-            decision = input("Your choice [a/d/e/m]: ").lower()
-
-        custom_deny_message = None
-        explanation = None
-        review_decision = ReviewDecision.APPROVE
-
-        # Handle the decision
-        if decision == "a":
-            # Approve
-            review_decision = ReviewDecision.APPROVE
-        elif decision == "d":
-            # Deny
-            review_decision = ReviewDecision.DENY
-            custom_deny_message = input("Reason for denial (optional): ")
-        elif decision == "e":
-            # Explain
-            review_decision = ReviewDecision.EXPLAIN
-            # Generate explanation
-            explanation = generate_command_explanation(command, self.config.model)
-            print(f"\n{TermColor.CYAN}Explanation:{TermColor.RESET}")
-            print(explanation)
-            print("\nNow that you have an explanation:")
+            print("\nOptions:")
             print(f"  {TermColor.GREEN}(a)pprove{TermColor.RESET} - Execute the command")
             print(f"  {TermColor.RED}(d)eny{TermColor.RESET} - Reject the command")
+            print(f"  {TermColor.BLUE}(e)xplain{TermColor.RESET} - Ask for an explanation")
+            print(f"  {TermColor.MAGENTA}(m)odify{TermColor.RESET} - Modify the command before running")
 
-            inner_decision = ""
-            while inner_decision not in ["a", "d"]:
-                inner_decision = input("Your choice [a/d]: ").lower()
+            decision = ""
+            while decision not in ["a", "d", "e", "m"]:
+                decision = input("Your choice [a/d/e/m]: ").lower()
 
-            if inner_decision == "a":
+            custom_deny_message = None
+            explanation = None
+            review_decision = ReviewDecision.APPROVE
+
+            # Handle the decision
+            if decision == "a":
+                # Approve
                 review_decision = ReviewDecision.APPROVE
-            else:
+            elif decision == "d":
+                # Deny
                 review_decision = ReviewDecision.DENY
                 custom_deny_message = input("Reason for denial (optional): ")
-        elif decision == "m":
-            # Modify
-            review_decision = ReviewDecision.MODIFY
-            # Not fully implemented yet
-            print("Modify functionality is not yet implemented. Denying command.")
-            review_decision = ReviewDecision.DENY
-            custom_deny_message = "User wanted to modify the command but this feature is not yet implemented"
+            elif decision == "e":
+                # Explain
+                review_decision = ReviewDecision.EXPLAIN
+                # Generate explanation
+                explanation = generate_command_explanation(command, self.config.model)
+                print(f"\n{TermColor.CYAN}Explanation:{TermColor.RESET}")
+                print(explanation)
+                print("\nNow that you have an explanation:")
+                print(f"  {TermColor.GREEN}(a)pprove{TermColor.RESET} - Execute the command")
+                print(f"  {TermColor.RED}(d)eny{TermColor.RESET} - Reject the command")
 
-        return CommandConfirmation(
-            review=review_decision,
-            custom_deny_message=custom_deny_message,
-            apply_patch=apply_patch,
-            explanation=explanation
-        )
+                inner_decision = ""
+                while inner_decision not in ["a", "d"]:
+                    inner_decision = input("Your choice [a/d]: ").lower()
 
-    def show_thinking_indicator(self):
-        """Show a thinking indicator with elapsed time while waiting for a response"""
-        if self.loading:
-            elapsed = int(time.time() - self.thinking_start_time)
-            sys.stdout.write(f"\rThinking... ({elapsed}s)")
-            sys.stdout.flush()
+                if inner_decision == "a":
+                    review_decision = ReviewDecision.APPROVE
+                else:
+                    review_decision = ReviewDecision.DENY
+                    custom_deny_message = input("Reason for denial (optional): ")
+            elif decision == "m":
+                # Modify
+                review_decision = ReviewDecision.MODIFY
+                # Not fully implemented yet
+                print("Modify functionality is not yet implemented. Denying command.")
+                review_decision = ReviewDecision.DENY
+                custom_deny_message = "User wanted to modify the command but this feature is not yet implemented"
+
+            return CommandConfirmation(
+                review=review_decision,
+                custom_deny_message=custom_deny_message,
+                apply_patch=apply_patch,
+                explanation=explanation
+            )
+        finally:
+            # Resume thinking indicator after confirmation is complete
+            self.resume_thinking()
 
     def send_message_to_agent(self, user_message=None, stream=True):
         """
@@ -273,14 +303,14 @@ class TerminalChat:
                         print(chunk.content, end="", flush=True)
                         has_content = True
 
-                # Print final newline if we had content
+                # Print final newlines if we had content
                 if has_content:
-                    print("")
+                    print("\n")  # Add an extra newline for spacing
             else:
                 # Non-streaming response
                 self.handle_loading_state(False)
                 if response and response.content:
-                    print(response.content)
+                    print(response.content + "\n")  # Add an extra newline for spacing
 
         except Exception as e:
             self.handle_loading_state(False)
@@ -383,7 +413,6 @@ class TerminalChat:
                 else:
                     return None
 
-            import readline
             readline.parse_and_bind("tab: complete")
             readline.set_completer(completer)
 
@@ -408,13 +437,8 @@ class TerminalChat:
                 if user_input is None:
                     continue
 
-                # Save to readline history (if available)
-                try:
-                    import readline
-                    readline.add_history(user_input)
-                    readline.write_history_file(chat_history_file)
-                except (NameError, FileNotFoundError):
-                    pass
+                readline.add_history(user_input)
+                readline.write_history_file(chat_history_file)
 
                 # Handle special commands using the command handler
                 if user_input.startswith("/"):
@@ -446,18 +470,40 @@ class TerminalChat:
             User input string, or None if user wants to exit
         """
         try:
-            # Display prompt
-            print("> ", end="", flush=True)
+            # Set up readline to prevent backspacing over the prompt
+            def pre_input(prompt):
+                readline.insert_text('')  # Ensure we're starting with empty input
+                readline.redisplay()
+                return prompt
+                
+            # Store original get_line_buffer to restore later
+            original_get_line_buffer = readline.get_line_buffer
+            # Override get_line_buffer to prevent backspacing over prompt
+            readline.get_line_buffer = lambda: original_get_line_buffer() or ''
+            
             # Get input lines until termination condition
             lines = []
+            first_line = True
             while True:
-                line = input()
-                # Check if the line is empty - termination condition
+                try:
+                    if first_line:
+                        # For first line, use custom prompt handling
+                        line = input(pre_input("> "))
+                        first_line = False
+                    else:
+                        line = input()
+                    lines.append(line)
+                except EOFError:
+                    # Handle Ctrl+D
+                    print("\nExiting...")
+                    self.should_exit = True
+                    return None
+                finally:
+                    # Restore original get_line_buffer
+                    if first_line:
+                        readline.get_line_buffer = original_get_line_buffer
                 if not line.strip():
-                    # Single empty line means we're done
                     break
-                lines.append(line)
-
             # If no valid input, return None
             if not lines or not any(line.strip() for line in lines):
                 print("Empty input, please try again.")
@@ -482,10 +528,6 @@ class TerminalChat:
             else:
                 print("Exiting...")
                 self.should_exit = True
-            return None
-        except EOFError:
-            print("\nExiting...")
-            self.should_exit = True
             return None
 
     def _save_to_input_history(self, user_input):
