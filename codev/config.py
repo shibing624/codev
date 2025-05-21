@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from codev.version import __version__
 
+
+ROOT_DIR = os.getenv("CODEV_HOME", os.path.expanduser("~/.codev/"))
 # Constants
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1/").rstrip("/")
 DEFAULT_MODEL = "gpt-4o"

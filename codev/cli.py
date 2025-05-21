@@ -8,7 +8,7 @@ import sys
 import argparse
 from loguru import logger
 
-from codev.config import load_config, CLI_VERSION
+from codev.config import load_config, CLI_VERSION, ROOT_DIR
 from codev.terminal_chat import TerminalChat
 
 
@@ -35,7 +35,7 @@ def main():
     # Configure logging
     logger.remove()
     logger.add(sys.stderr, level="INFO")
-    logger.add(os.path.expanduser("~/.codev/codev.log"), rotation="10 MB", level="DEBUG")
+    logger.add(os.path.join(ROOT_DIR, "codev_cli.log"), rotation="10 MB")
 
     # Load configuration
     config = load_config(args.config)

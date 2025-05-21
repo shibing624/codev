@@ -7,16 +7,16 @@
 import os
 import sys
 import time
+import threading
 from loguru import logger
-from typing import List, Optional, Dict, Any, Callable
+from typing import List, Optional
 
-from codev.config import AppConfig, CLI_VERSION
+from codev.config import AppConfig, CLI_VERSION, ROOT_DIR
 from codev.agent import ReviewDecision, CommandConfirmation, ApplyPatchCommand, CodevAgent
 from codev.format_command import format_command_for_display
 from codev.approvals import generate_command_explanation, ApprovalPolicy
 from codev.commands import CommandHandler, TermColor, COLOR_MAP, POLICY_COLORS
 from codev.history_manager import HistoryManager
-import readline
 
 
 def colored_text(text: str, color: str) -> str:
@@ -83,6 +83,7 @@ class TerminalChat:
         self.thinking_start_time = 0
         self.should_exit = False
         self._input_history = []  # Initialize input history
+        self._indicator_thread = None  # Thread for thinking indicator
 
         # Initialize history manager
         self.history_manager = HistoryManager()
@@ -127,12 +128,24 @@ class TerminalChat:
         self.loading = is_loading
         if is_loading:
             self.thinking_start_time = time.time()
-            sys.stdout.write("\rThinking...")
-            sys.stdout.flush()
+
+            # Start the thinking indicator thread
+            def update_indicator():
+                while self.loading:
+                    self.show_thinking_indicator()
+                    time.sleep(1)  # Update every second
+
+            self._indicator_thread = threading.Thread(target=update_indicator)
+            self._indicator_thread.daemon = True
+            self._indicator_thread.start()
         else:
             # Clear the thinking indicator
             sys.stdout.write("\r" + " " * 30 + "\r")
             sys.stdout.flush()
+            # Wait for indicator thread to finish if it exists
+            if self._indicator_thread:
+                self._indicator_thread.join(timeout=0.1)
+                self._indicator_thread = None
 
     def get_command_confirmation(self, command: List[str],
                                  apply_patch: Optional[ApplyPatchCommand]) -> CommandConfirmation:
@@ -239,27 +252,40 @@ class TerminalChat:
         if user_message == self.initial_prompt:
             self.initial_image_paths = []
 
-        self.handle_loading_state(True)
-        response = self.agent.send_message(user_message, stream=stream)
-        if stream:
-            # Stream the response
-            has_content = False
-            for chunk in response:
-                if chunk and chunk.content:
-                    # First chunk received, clear thinking indicator
-                    if self.loading:
-                        self.handle_loading_state(False)
-                    print(chunk.content, end="", flush=True)
-                    has_content = True
+        try:
+            # Set loading state and start thinking indicator
+            self.handle_loading_state(True)
 
-            # Print final newline if we had content
-            if has_content:
-                print("")
-        else:
-            # Non-streaming response
+            # Get response from agent
+            response = self.agent.send_message(user_message, stream=stream)
+
+            if stream:
+                # Stream the response
+                has_content = False
+                first_chunk = True
+
+                for chunk in response:
+                    if chunk and chunk.content:
+                        if first_chunk:
+                            # First chunk received, clear thinking indicator
+                            self.handle_loading_state(False)
+                            first_chunk = False
+                        print(chunk.content, end="", flush=True)
+                        has_content = True
+
+                # Print final newline if we had content
+                if has_content:
+                    print("")
+            else:
+                # Non-streaming response
+                self.handle_loading_state(False)
+                if response and response.content:
+                    print(response.content)
+
+        except Exception as e:
             self.handle_loading_state(False)
-            if response and response.content:
-                print(response.content)
+            logger.exception("Error in send_message_to_agent:")
+            print(f"\n{TermColor.RED}Error: {str(e)}{TermColor.RESET}")
 
     def print_header(self):
         """Print the application header with version and model information"""
@@ -344,7 +370,8 @@ class TerminalChat:
         self.process_initial_prompt()
 
         # Enable readline support (if available)
-        history_file = os.path.expanduser("~/.codev/chat_history.log")
+        chat_history_file = os.path.join(ROOT_DIR, "chat_history.log")
+        os.makedirs(os.path.dirname(chat_history_file), exist_ok=True)
         try:
             # Set basic command auto-completion
             def completer(text, state):
@@ -356,11 +383,12 @@ class TerminalChat:
                 else:
                     return None
 
+            import readline
             readline.parse_and_bind("tab: complete")
             readline.set_completer(completer)
 
             try:
-                readline.read_history_file(history_file)
+                readline.read_history_file(chat_history_file)
             except FileNotFoundError:
                 pass
 
@@ -382,8 +410,9 @@ class TerminalChat:
 
                 # Save to readline history (if available)
                 try:
+                    import readline
                     readline.add_history(user_input)
-                    readline.write_history_file(history_file)
+                    readline.write_history_file(chat_history_file)
                 except (NameError, FileNotFoundError):
                     pass
 

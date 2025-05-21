@@ -5,26 +5,26 @@
 """
 import os
 import json
-import time
 import shutil
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from loguru import logger
 
 from codev.commands import TermColor
+from codev.config import ROOT_DIR
 
 
 class HistoryManager:
     """History record manager, handles storage and retrieval of command and file edit history"""
 
-    def __init__(self, history_file: str = "~/.codev/history.json"):
+    def __init__(self, history_file: str = os.path.join(ROOT_DIR, "history.json")):
         """
         Initialize history record manager
         
         Args:
             history_file: History record file path
         """
-        self.history_file = os.path.expanduser(history_file)
+        self.history_file = history_file
         self.backup_dir = os.path.join(os.path.dirname(self.history_file), "backups")
         self.command_history: List[Dict[str, Any]] = []
         self.file_edit_history: List[Dict[str, Any]] = []
