@@ -215,11 +215,10 @@ class TerminalChat:
             print(f"  {TermColor.GREEN}(a)pprove{TermColor.RESET} - Execute the command")
             print(f"  {TermColor.RED}(d)eny{TermColor.RESET} - Reject the command")
             print(f"  {TermColor.BLUE}(e)xplain{TermColor.RESET} - Ask for an explanation")
-            print(f"  {TermColor.MAGENTA}(m)odify{TermColor.RESET} - Modify the command before running")
 
             decision = ""
-            while decision not in ["a", "d", "e", "m"]:
-                decision = input("Your choice [a/d/e/m]: ").lower()
+            while decision not in ["a", "d", "e"]:
+                decision = input("Your choice [a/d/e]: ").lower()
 
             custom_deny_message = None
             explanation = None
@@ -253,13 +252,6 @@ class TerminalChat:
                 else:
                     review_decision = ReviewDecision.DENY
                     custom_deny_message = input("Reason for denial (optional): ")
-            elif decision == "m":
-                # Modify
-                review_decision = ReviewDecision.MODIFY
-                # Not fully implemented yet
-                print("Modify functionality is not yet implemented. Denying command.")
-                review_decision = ReviewDecision.DENY
-                custom_deny_message = "User wanted to modify the command but this feature is not yet implemented"
 
             return CommandConfirmation(
                 review=review_decision,

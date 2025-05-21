@@ -22,7 +22,6 @@ class ReviewDecision(Enum):
     APPROVE = "approve"
     DENY = "deny"
     EXPLAIN = "explain"
-    MODIFY = "modify"
 
 
 @dataclass
@@ -204,7 +203,8 @@ class CodevAgent:
             logger.debug(f"Writing to file: {path}")
 
             # Check if we need to confirm
-            if self.approval_policy != "full-auto" and self.approval_policy != "auto-edit" and self.get_command_confirmation:
+            if (self.approval_policy != "full-auto" and self.approval_policy != "auto-edit"
+                    and self.get_command_confirmation):
                 try:
                     # Create apply patch command for confirmation
                     apply_patch = ApplyPatchCommand(
@@ -218,7 +218,6 @@ class CodevAgent:
                     else:
                         # If the confirmation function is async, we can't call it directly
                         confirmation = CommandConfirmation(review=ReviewDecision.APPROVE)
-
                     if confirmation.review != ReviewDecision.APPROVE:
                         deny_message = confirmation.custom_deny_message or "File edit not approved by user"
                         logger.info(f"File edit denied: {deny_message}")
@@ -330,7 +329,6 @@ class CodevAgent:
         if not user_message:
             return None
         return self.agent.run(user_message, stream=stream)
-            
 
     def cancel(self):
         """
