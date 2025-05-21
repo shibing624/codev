@@ -20,7 +20,7 @@ class AppConfig:
     """Configuration for the CLI application"""
     model: str = DEFAULT_MODEL
     instructions: Optional[str] = None
-    notify: bool = False
+    debug: bool = False
     theme: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -62,8 +62,8 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 config.model = config_data["model"]
             if "instructions" in config_data:
                 config.instructions = config_data["instructions"]
-            if "notify" in config_data:
-                config.notify = config_data["notify"]
+            if "debug" in config_data:
+                config.debug = config_data["debug"]
             if "theme" in config_data:
                 config.theme.update(config_data["theme"])
 

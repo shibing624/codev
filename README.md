@@ -12,108 +12,96 @@
 [![PyPI version](https://badge.fury.io/py/pycodev.svg)](https://badge.fury.io/py/pycodev)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![python_vesion](https://img.shields.io/badge/Python-3.8%2B-green.svg)](requirements.txt)
+[![python_vesion](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/codev.svg)](https://github.com/shibing624/codev/issues)
-[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
+[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#联系我们)
 
-## 简介
+Codev CLI 是一个基于 agentica 库的 AI 编码助手，它提供了一个交互式终端界面，让您可以与 AI 助手进行对话，执行命令和编辑文件。
 
-CodeV是一个在您的终端中运行的编码助手，帮助您更高效地编写、编辑和执行代码。
-
-## 特性
+## 功能特点
 
 - 💬 在终端直接交互的聊天界面
-- 🚀 执行AI建议的命令
-- ✏️ 用AI生成的代码编辑文件
-- 🖼️ 支持上传图片提供视觉上下文
-- 🔒 灵活的批准策略（建议、自动编辑、全自动）
-- 📝 清晰的命令解释
+- 🚀 支持命令执行和文件编辑
+- 📝 历史记录管理，包括命令和文件编辑历史
+- 🔒 多种审批策略（suggest、auto-edit、full-auto）
+- 🖼️ 支持图像输入（用于视觉模型）
 - 🛠️ 支持MCP服务器和工具集成
 
 ## 安装
 
-### 选项1：通过pip安装
+### 方式一：通过 pip 安装
 ```bash
 pip install pycodev
 ```
 
-### 选项2：从源代码安装
+### 方式二：从源码安装
 ```bash
+# 克隆仓库
 git clone https://github.com/shibing624/codev.git
 cd codev
+pip install -r requirements.txt
 pip install -e .
 ```
 
-### 设置您的OpenAI API密钥：
+### 设置 OpenAI API 密钥
 ```bash
-export OPENAI_API_KEY=your_api_key_here
-export OPENAI_BASE_URL=your_base_url_here # https://api.openai.com/v1
+export OPENAI_API_KEY=你的API密钥
+export OPENAI_BASE_URL=你的API基础URL # https://api.openai.com/v1
 ```
+
+您也可以在 `~/.agentica/.env` 文件中设置这些环境变量。
 
 ## 使用方法
 
-### 基本用法：
+### 基本使用
+
 ```bash
 codev
 ```
 
-### 使用初始提示：
+### 使用初始提示
+
 ```bash
-codev --prompt "创建一个带有REST API的Flask应用程序"
+codev --prompt "创建一个简单的 Python HTTP 服务器"
 ```
 
-### 使用批准策略：
+### 指定模型
+
 ```bash
-codev --approval-policy suggest|auto-edit|full-auto
+codev --model gpt-4o --prompt "优化这段代码"
 ```
 
-## 命令行参数
+### 使用图像
 
-| 参数 | 描述 |
-|----------|-------------|
-| `--model` | 要使用的模型（默认：gpt-4o） |
-| `--prompt` | 发送给模型的初始提示 |
-| `--image` | 与提示一起包含的图片文件路径（可多次使用） |
-| `--approval-policy` | 命令的批准策略（suggest、auto-edit、full-auto） |
-| `--writable` | 额外的可写目录（可多次使用） |
-| `--full-stdout` | 显示命令的完整标准输出 |
-| `--notify` | 启用桌面通知 |
-| `--config` | 配置文件路径 |
+```bash
+codev --image path/to/image.png --prompt "解释这张图中的代码"
+```
 
-## 批准策略
+### 设置审批策略
 
-- `suggest`：AI建议命令和文件编辑，但需要您的批准
-- `auto-edit`：AI自动编辑文件，但需要批准shell命令
-- `full-auto`：AI自动执行命令和编辑文件，无需批准
+```bash
+# 建议模式（默认）：AI 助手会请求您确认命令和文件编辑
+codev --approval suggest
 
-## 聊天命令
+# 自动编辑模式：AI 助手可以自动编辑文件，但需要您确认命令
+codev --approval auto-edit
 
-- `/help` - 显示帮助信息
-- `/model` - 在会话中切换LLM模型
-- `/approval` - 切换批准策略模式
-- `/history` - 显示会话中的命令和文件历史
-- `/clear` - 清除屏幕和上下文
-- `/clearhistory` - 清除命令历史
-- `/compact` - 将上下文压缩为摘要
-- `/exit` 或 `/quit` - 退出应用程序
+# 完全自动模式：AI 助手可以自动执行命令和编辑文件，无需确认
+codev --approval full-auto
+```
 
-## 键盘快捷键
+### 使用配置文件
 
-- Enter - 发送消息
-- Ctrl+J - 插入换行符
-- Up/Down - 滚动提示历史记录
-- Esc(×2) - 中断当前操作
-- Ctrl+C - 退出Codev
+```bash
+codev --config path/to/config.json
+```
 
-## 配置
-
-您可以创建一个具有以下结构的JSON配置文件：
+配置文件示例（config.json）：
 
 ```json
 {
   "model": "gpt-4o",
-  "instructions": "给AI的自定义指令",
-  "notify": false,
+  "instructions": "你是一个专注于 Python 开发的 AI 助手",
   "theme": {
     "user": "blue",
     "assistant": "green",
@@ -124,10 +112,51 @@ codev --approval-policy suggest|auto-edit|full-auto
 }
 ```
 
-然后使用以下命令：
-```bash
-codev --config path/to/config.json
-```
+## 命令行选项
+
+| 参数 | 描述 |
+|----------|-------------|
+| `--model`, `-m` | 使用的模型（例如 gpt-4o, gpt-4-turbo） |
+| `--prompt`, `-p` | 初始提示发送给模型 |
+| `--image`, `-i` | 图像文件路径（可多次使用） |
+| `--approval`, `-a` | 命令审批策略（suggest, auto-edit, full-auto） |
+| `--full-stdout`, `-f` | 显示完整的命令输出 |
+| `--config`, `-c` | 配置文件路径 |
+| `--version`, `-v` | 显示版本信息 |
+
+## 审批策略
+
+- `suggest`：AI 助手会建议命令和文件编辑，但需要您的批准
+- `auto-edit`：AI 助手可以自动编辑文件，但需要您批准 shell 命令
+- `full-auto`：AI 助手可以自动执行命令和编辑文件，无需批准
+
+## 交互式命令
+
+在交互式会话中，您可以使用以下命令：
+
+- `/help` - 显示帮助信息
+- `/model [model_name]` - 查看或更改当前使用的模型
+- `/approval [policy]` - 查看或更改当前的审批策略
+- `/history [all] [full]` - 显示历史记录
+- `/clear` - 清除当前会话
+- `/clearhistory [session]` - 清除历史记录
+- `/compact` - 将对话上下文压缩为摘要
+- `/exit` 或 `/quit` - 退出程序
+
+## 键盘快捷键
+
+- Enter - 发送消息
+- Ctrl+J - 插入换行符
+- 上/下方向键 - 滚动浏览提示历史
+- Esc(×2) - 中断当前操作
+- Ctrl+C - 退出 Codev
+
+## 使用 agentica 库
+
+此版本的 Codev CLI 使用 agentica 库作为底层 AI 交互框架。agentica 是一个强大的框架，用于构建智能、具备反思能力、可协作的多模态 AI 代理。
+
+更多关于 agentica 的信息，请访问：https://github.com/shibing624/agentica
+
 
 ## 联系我们
 

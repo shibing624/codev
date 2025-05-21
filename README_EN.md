@@ -12,7 +12,7 @@
 [![PyPI version](https://badge.fury.io/py/pycodev.svg)](https://badge.fury.io/py/pycodev)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![python_vesion](https://img.shields.io/badge/Python-3.8%2B-green.svg)](requirements.txt)
+[![python_vesion](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/codev.svg)](https://github.com/shibing624/codev/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
@@ -41,6 +41,7 @@ pip install pycodev
 ```bash
 git clone https://github.com/shibing624/codev.git
 cd codev
+pip install -r requirements.txt
 pip install -e .
 ```
 
@@ -49,6 +50,8 @@ pip install -e .
 export OPENAI_API_KEY=your_api_key_here
 export OPENAI_BASE_URL=your_base_url_here # https://api.openai.com/v1
 ```
+
+You can also set these environment variables in the `~/.agentica/.env` file.
 
 ## Usage
 
@@ -62,23 +65,37 @@ codev
 codev --prompt "Create a Flask application with a REST API"
 ```
 
+### With model specification:
+```bash
+codev --model gpt-4o --prompt "Optimize this code"
+```
+
+### With image input:
+```bash
+codev --image path/to/image.png --prompt "Explain the code in this image"
+```
+
 ### With approval policy:
 ```bash
-codev --approval-policy suggest|auto-edit|full-auto
+codev --approval suggest|auto-edit|full-auto
+```
+
+### With configuration file:
+```bash
+codev --config path/to/config.json
 ```
 
 ## Command Line Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `--model` | The model to use (default: gpt-4o) |
-| `--prompt` | Initial prompt to send to the model |
-| `--image` | Image file paths to include with the prompt (can be used multiple times) |
-| `--approval-policy` | Approval policy for commands (suggest, auto-edit, full-auto) |
-| `--writable` | Additional writable directories (can be used multiple times) |
-| `--full-stdout` | Show full stdout for commands |
-| `--notify` | Enable desktop notifications |
-| `--config` | Path to config file |
+| `--model`, `-m` | The model to use (default: gpt-4o) |
+| `--prompt`, `-p` | Initial prompt to send to the model |
+| `--image`, `-i` | Image file paths to include with the prompt (can be used multiple times) |
+| `--approval`, `-a` | Approval policy for commands (suggest, auto-edit, full-auto) |
+| `--full-stdout`, `-f` | Show full stdout for commands |
+| `--config`, `-c` | Path to config file |
+| `--version`, `-v` | Show version information |
 
 ## Approval Policies
 
@@ -113,7 +130,6 @@ You can create a JSON configuration file with the following structure:
 {
   "model": "gpt-4o",
   "instructions": "Custom instructions for the AI",
-  "notify": false,
   "theme": {
     "user": "blue",
     "assistant": "green",

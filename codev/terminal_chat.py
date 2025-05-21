@@ -6,11 +6,8 @@
 
 import os
 import sys
-import time
-import asyncio
 from loguru import logger
-import json
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Callable
 
 from codev.config import AppConfig, CLI_VERSION
 from codev.agent import ReviewDecision, CommandConfirmation, ApplyPatchCommand, CodevAgent
@@ -18,6 +15,7 @@ from codev.format_command import format_command_for_display
 from codev.approvals import generate_command_explanation, ApprovalPolicy
 from codev.commands import CommandHandler, TermColor, COLOR_MAP, POLICY_COLORS
 from codev.history_manager import HistoryManager
+import readline
 
 
 def colored_text(text: str, color: str) -> str:
@@ -60,7 +58,6 @@ class TerminalChat:
             prompt: Optional[str] = None,
             image_paths: Optional[List[str]] = None,
             approval_policy: ApprovalPolicy = "suggest",
-            additional_writable_roots: List[str] = None,
             full_stdout: bool = False,
     ):
         """
@@ -71,14 +68,12 @@ class TerminalChat:
             prompt: Initial prompt to send to the model
             image_paths: Paths to images to include with the prompt
             approval_policy: Approval policy for commands, 'auto-edit', 'full-auto', or 'suggest'
-            additional_writable_roots: Additional writable directories
             full_stdout: Whether to show full command output
         """
         self.config = config
         self.initial_prompt = prompt
         self.initial_image_paths = image_paths or []
         self.approval_policy = approval_policy
-        self.additional_writable_roots = additional_writable_roots or []
         self.full_stdout = full_stdout
 
         self.command_history = []
@@ -86,24 +81,25 @@ class TerminalChat:
         self.loading = False
         self.thinking_seconds = 0
         self.should_exit = False
+        self._input_history = []  # Initialize input history
 
         # Initialize history manager
         self.history_manager = HistoryManager()
-
-        # Initialize command handler
-        self.command_handler = CommandHandler(self)
 
         # Initialize CodevAgent
         self.agent = CodevAgent(
             config=self.config,
             approval_policy=self.approval_policy,
-            additional_writable_roots=self.additional_writable_roots,
             on_message=self.handle_agent_message,
             on_loading=self.handle_loading_state,
             get_command_confirmation=self.get_command_confirmation,
-            history_manager=self.history_manager
+            history_manager=self.history_manager,
+            instructions=self.config.instructions,
+            debug=self.config.debug,
         )
-
+        # Initialize command handler
+        self.command_handler = CommandHandler(self)
+        
     def handle_agent_message(self, message):
         """
         Handle messages from the agent
@@ -115,7 +111,8 @@ class TerminalChat:
         content = message.get("content", "")
 
         if role == "assistant":
-            print(f"{colored_text('Assistant: ', 'bright_green')}{content}")
+            # Print without "Assistant:" prefix
+            print(f"\n{content}")
         elif role == "system":
             print(f"{colored_text('System: ', 'yellow')}{content}")
         elif role == "error":
@@ -229,22 +226,20 @@ class TerminalChat:
         sys.stdout.write(f"\rThinking{dots}    ")
         sys.stdout.flush()
 
-    async def send_message_to_agent(self, user_message=None):
+    def send_message_to_agent(self, user_message=None):
         """
         Send a message to the agent
         
         Args:
             user_message: Optional user message to send
         """
-        if user_message:
-            print(f"{colored_text('You: ', 'bright_blue')}{user_message}")
-
-        # Send message to agent
-        self.agent.send_message(user_message, self.initial_image_paths if user_message == self.initial_prompt else None)
-
-        # Clear initial image paths after first use
         if user_message == self.initial_prompt:
             self.initial_image_paths = []
+            # Don't print "You:" prefix
+            print(f"\n{user_message}")
+
+        # Send message to agent
+        self.agent.send_message(user_message)
 
     def print_header(self):
         """Print the application header with version and model information"""
@@ -297,11 +292,16 @@ class TerminalChat:
         help_line = f"{header_color}│{reset} Type {accent_color}/help{reset} for available commands"
         padding = box_width - len(help_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
         print(f"{help_line}{' ' * padding}{header_color}│{reset}")
-
+        
+        # Input instructions
+        input_line = f"{header_color}│{reset} Input with {accent_color}>{reset} prompt, press {accent_color}Enter twice{reset} to submit"
+        padding = box_width - len(input_line) + len(header_color) + len(reset) + 2 * len(accent_color) + 2 * len(reset)
+        print(f"{input_line}{' ' * padding}{header_color}│{reset}")
+        
         print(border_bottom)
         print()
 
-    async def process_initial_prompt(self):
+    def process_initial_prompt(self):
         """Process the initial prompt if provided"""
         if self.initial_prompt or self.initial_image_paths:
             content = self.initial_prompt or ""
@@ -314,19 +314,17 @@ class TerminalChat:
                     content = "[Please analyze these images]"
 
             # Send to agent
-            await self.send_message_to_agent(content)
+            self.send_message_to_agent(content)
 
-    async def run(self):
+    def run(self):
         """Run the terminal chat interface"""
         self.print_header()
 
         # Process initial prompt if provided
-        await self.process_initial_prompt()
+        self.process_initial_prompt()
 
         # Enable readline support (if available)
         try:
-            import readline
-
             # Set basic command auto-completion
             def completer(text, state):
                 commands = ["/help", "/model", "/approval", "/history",
@@ -341,7 +339,7 @@ class TerminalChat:
             readline.set_completer(completer)
 
             # Add history functionality
-            history_file = os.path.expanduser("~/.codev_history")
+            history_file = os.path.expanduser("~/.codev/chat_history")
             try:
                 readline.read_history_file(history_file)
             except FileNotFoundError:
@@ -357,27 +355,28 @@ class TerminalChat:
                 if self.loading:
                     self.show_thinking_indicator()
                     self.thinking_seconds += 1
-                    await asyncio.sleep(1)
                     continue
 
                 # Get user input
-                user_input = input(f"{TermColor.BRIGHT_BLUE}You:{TermColor.RESET} ")
+                user_input = self.get_user_input()
 
+                # Check if user wants to exit
+                if user_input is None:
+                    print("\nExiting...")
+                    self.should_exit = True
+                    continue
                 # Save to readline history (if available)
                 try:
                     readline.add_history(user_input)
                     readline.write_history_file(history_file)
                 except (NameError, FileNotFoundError):
                     pass
-
                 # Handle special commands using the command handler
                 if user_input.startswith("/"):
                     if self.command_handler.handle_command(user_input):
                         continue
-
                 # Send message to the agent
-                await self.send_message_to_agent(user_input)
-
+                self.send_message_to_agent(user_input)
             except KeyboardInterrupt:
                 print("\n\nUser interrupted.")
                 if self.loading:
@@ -386,36 +385,119 @@ class TerminalChat:
                 else:
                     print("Exiting...")
                     self.should_exit = True
-
             except Exception as e:
                 print(f"\n{TermColor.RED}Error: {str(e)}{TermColor.RESET}")
                 logger.exception("Terminal chat error:")
 
         print("\nThank you for using Codev CLI. Goodbye!")
 
-
-# Helper function to run the terminal chat asynchronously
-def run_terminal_chat(config=AppConfig(), prompt=None, image_paths=None,
-                      approval_policy="suggest", additional_writable_roots=None,
-                      full_stdout=False):
-    """Run the terminal chat interface"""
-    terminal = TerminalChat(
-        config=config,
-        prompt=prompt,
-        image_paths=image_paths,
-        approval_policy=approval_policy,
-        additional_writable_roots=additional_writable_roots,
-        full_stdout=full_stdout
-    )
-
-    # Run the terminal chat asynchronously
-    asyncio.run(terminal.run())
+    def get_user_input(self):
+        """
+        Get user input with support for multi-line editing
+        
+        Returns:
+            User input string, or None if user wants to exit
+        """
+        try:
+            # Display prompt - just use ">" instead of "You:"
+            print("> ", end="", flush=True)
+            
+            # Get input using the simple multi-line method
+            user_input = self._get_simple_input()
+            
+            if user_input is None:
+                return None
+                
+            # Check if user wants to exit
+            if user_input.strip() in ['\\q', 'exit', 'quit']:
+                print("\nExiting...")
+                self.should_exit = True
+                return None
+            
+            # Handle empty input
+            if not user_input.strip():
+                print("Empty input, please try again.")
+                return self.get_user_input()
+                
+            # Save to history
+            self._save_to_input_history(user_input)
+            return user_input
+        except KeyboardInterrupt:
+            print("\nOperation interrupted.")
+            if self.loading:
+                print("Cancelling current request...")
+                self.agent.cancel()
+            else:
+                print("Exiting...")
+                self.should_exit = True
+            return None
+        except EOFError:
+            print("\nExiting...")
+            self.should_exit = True
+            return None
+            
+    def _get_simple_input(self):
+        """
+        Get multi-line user input with improved code paste support
+        
+        This method implements a simple but effective multi-line input system:
+        1. First line is entered directly with the ">" prompt
+        2. Subsequent lines are collected without additional prompts
+        3. Input is terminated when the user enters two empty lines in a row
+        4. Code pasting is supported naturally - each line is treated as a separate input
+        
+        Returns:
+            User input string or None if canceled
+        """
+        lines = []
+        empty_line_count = 0
+        
+        # Get input lines until termination condition
+        while True:
+            try:
+                # For the first line, prompt is already displayed in get_user_input
+                # For subsequent lines, don't show any prompt to avoid confusion with pasted code
+                if lines:
+                    line = input()
+                else:
+                    line = input()
+                
+                # Check if the line is empty
+                if not line.strip():
+                    empty_line_count += 1
+                    # Two consecutive empty lines means we're done
+                    if empty_line_count >= 1:
+                        break
+                else:
+                    empty_line_count = 0
+                # Add the line to our buffer
+                lines.append(line)
+            except KeyboardInterrupt:
+                print("\nInput canceled.")
+                return None
+        # If no valid input, return None
+        if not any(line.strip() for line in lines):
+            print("Empty input, please try again.")
+            return self.get_user_input()
+        # Join lines
+        user_input = '\n'.join(lines)
+        return user_input.strip()
+        
+    def _save_to_input_history(self, user_input):
+        """
+        Save input to history
+        
+        Args:
+            user_input: User input to save
+        """
+        # Avoid duplicates in history
+        if not self._input_history or self._input_history[-1] != user_input:
+            self._input_history.append(user_input)
+            # Keep history size reasonable
+            if len(self._input_history) > 50:
+                self._input_history = self._input_history[-50:]
 
 
 if __name__ == '__main__':
-    # Example usage
-    run_terminal_chat(
-        config=AppConfig(),
-        prompt="写一个快排的python脚本，保存为b.py",
-        approval_policy="full-auto",
-    )
+    terminal = TerminalChat()
+    terminal.send_message_to_agent("Write a Python quicksort script")

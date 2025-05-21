@@ -14,7 +14,6 @@ from loguru import logger
 from agentica import Agent, OpenAIChat
 
 from codev.config import AppConfig
-from codev.history_manager import HistoryManager
 from codev.tools import ShellTool, FileTool
 
 
@@ -52,11 +51,11 @@ class CodevAgent:
             self,
             config: 'AppConfig',
             approval_policy: str = "auto-edit",
-            additional_writable_roots: List[str] = None,
             on_message: Callable[[Dict[str, Any]], None] = None,
             on_loading: Callable[[bool], None] = None,
             get_command_confirmation: Optional[Callable] = None,
             history_manager=None,
+            instructions: Union[List[str], str, None] = None,
             debug: bool = False,
     ):
         """
@@ -65,24 +64,20 @@ class CodevAgent:
         Args:
             config: The application configuration
             approval_policy: The approval policy to use, 'auto-edit', 'full-auto', or 'suggest'
-            additional_writable_roots: Additional directories that can be written to
             on_message: Callback for when a message is received
             on_loading: Callback for when the loading state changes
             get_command_confirmation: Callback to request confirmation for commands
             history_manager: Manager for conversation history
+            instructions: Instructions for the agent
             debug: Enable debug mode
         """
         self.config = config
         self.model = config.model  # Store model from config for easy access
         self.approval_policy = approval_policy
-        self.additional_writable_roots = additional_writable_roots or []
         self.on_message = on_message
         self.on_loading = on_loading
         self.get_command_confirmation = get_command_confirmation
         self.history_manager = history_manager
-
-        # Initialize conversation history
-        self.conversation_history = []
 
         # Initialize state variables
         self.is_running = False
@@ -103,10 +98,13 @@ class CodevAgent:
         self.agent = Agent(
             model=OpenAIChat(id=self.config.model),
             system_prompt=system_message,
+            instructions=instructions,
             tools=[self.shell_tool.execute_command, self.file_tool.write, self.file_tool.read, self.file_tool.delete],
             show_tool_calls=debug,
             debug=debug,
         )
+        # Initialize conversation history
+        self.conversation_history = self.agent.memory.messages
 
     def _create_custom_shell_tool(self):
         """
@@ -144,7 +142,6 @@ class CodevAgent:
                         confirmation = self.get_command_confirmation(cmd_list, None)
                     else:
                         # If the confirmation function is async, we can't call it directly
-                        logger.warning("Command confirmation function is async but we're in sync mode")
                         confirmation = CommandConfirmation(review=ReviewDecision.APPROVE)
 
                     if confirmation.review != ReviewDecision.APPROVE:
@@ -224,7 +221,6 @@ class CodevAgent:
                         confirmation = self.get_command_confirmation(["edit", path], apply_patch)
                     else:
                         # If the confirmation function is async, we can't call it directly
-                        logger.warning("File edit confirmation function is async but we're in sync mode")
                         confirmation = CommandConfirmation(review=ReviewDecision.APPROVE)
 
                     if confirmation.review != ReviewDecision.APPROVE:
@@ -285,7 +281,6 @@ class CodevAgent:
                         confirmation = self.get_command_confirmation(["delete", path], None)
                     else:
                         # If the confirmation function is async, we can't call it directly
-                        logger.warning("File deletion confirmation function is async but we're in sync mode")
                         confirmation = CommandConfirmation(review=ReviewDecision.APPROVE)
 
                     if confirmation.review != ReviewDecision.APPROVE:
@@ -324,144 +319,20 @@ class CodevAgent:
         """Generate a unique session ID"""
         return f"session_{int(time.time())}"
 
-    def send_message(self, user_message: str, images: List[str] = None):
+    def send_message(self, user_message: str):
         """
         Send a message to the agent and handle the response
         
         Args:
             user_message: The user's message
-            images: Optional list of image paths to include
         """
         if self.on_loading:
             self.on_loading(True)
-
-        try:
-            # Define a callback for handling tool calls
-            def tool_callback(tool_call):
-                tool_name = tool_call.get("function", {}).get("name")
-
-                # Parse tool arguments, handling potential JSON errors
-                try:
-                    tool_args_str = tool_call.get("function", {}).get("arguments", "{}")
-                    tool_args = json.loads(tool_args_str)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing tool arguments: {e}")
-                    logger.debug(f"Raw arguments: {tool_args_str}")
-                    tool_args = {}
-
-                logger.debug(f"Tool call: {tool_name} with args: {tool_args}")
-
-                try:
-                    result = None
-                    if tool_name == "run_terminal_cmd":
-                        command = tool_args.get("command")
-                        is_background = tool_args.get("is_background", False)
-                        result = self.shell_tool.execute_command(command, is_background)
-
-                    elif tool_name == "edit_file":
-                        target_file = tool_args.get("target_file") or tool_args.get("path")
-                        content = tool_args.get("content") or tool_args.get("code_edit")
-                        if target_file and content:
-                            result = self.file_tool.write(target_file, content)
-                        else:
-                            result = "Error: Missing target_file or content for edit_file"
-
-                    elif tool_name == "read_file":
-                        target_file = tool_args.get("target_file") or tool_args.get("path")
-                        if target_file:
-                            result = self.file_tool.read(target_file)
-                        else:
-                            result = "Error: Missing target_file for read_file"
-
-                    elif tool_name == "delete_file":
-                        target_file = tool_args.get("target_file") or tool_args.get("path")
-                        if target_file:
-                            result = self.file_tool.delete(target_file)
-                        else:
-                            result = "Error: Missing target_file for delete_file"
-
-                    # Handle custom tool names that might be registered by agentica
-                    elif tool_name == "custom_execute_command":
-                        command = tool_args.get("command")
-                        is_background = tool_args.get("is_background", False)
-                        result = self.shell_tool.execute_command(command, is_background)
-
-                    elif tool_name == "custom_write":
-                        path = tool_args.get("path")
-                        content = tool_args.get("content")
-                        if path and content:
-                            result = self.file_tool.write(path, content)
-                        else:
-                            result = "Error: Missing path or content for custom_write"
-
-                    elif tool_name == "custom_read":
-                        path = tool_args.get("path")
-                        if path:
-                            result = self.file_tool.read(path)
-                        else:
-                            result = "Error: Missing path for custom_read"
-
-                    elif tool_name == "custom_delete":
-                        path = tool_args.get("path")
-                        if path:
-                            result = self.file_tool.delete(path)
-                        else:
-                            result = "Error: Missing path for custom_delete"
-
-                    else:
-                        result = f"Unknown tool: {tool_name}"
-
-                    # Make sure we return a string
-                    if isinstance(result, str):
-                        return result
-                    else:
-                        return str(result)
-
-                except Exception as e:
-                    logger.error(f"Error executing tool {tool_name}: {str(e)}")
-                    return f"Error executing {tool_name}: {str(e)}"
-
-            response = None
-            if hasattr(self.agent, "run") and callable(self.agent.run):
-                # Use the run method if available
-                logger.debug("Using run method")
-
-                # Set the tool_callback on the agent if it has a tool_callback attribute
-                if hasattr(self.agent, "tool_callback"):
-                    self.agent.tool_callback = tool_callback
-
-                response = self.agent.run(user_message)
-            else:
-                # No compatible response generation method found
-                raise NotImplementedError("Agent has no compatible response generation method")
-
-            # Handle the response
-            if isinstance(response, str):
-                # Simple string response
-                if self.on_message:
-                    self.on_message({"role": "assistant", "content": response})
-            elif hasattr(response, "content") and response.content:
-                # Response object with content attribute
-                if self.on_message:
-                    self.on_message({"role": "assistant", "content": response.content})
-            elif isinstance(response, dict) and "content" in response:
-                # Dictionary with content key
-                if self.on_message:
-                    self.on_message({"role": "assistant", "content": response["content"]})
-            else:
-                # Unknown response format
-                logger.warning(f"Unknown response format: {type(response)}")
-                if self.on_message:
-                    self.on_message({"role": "assistant", "content": str(response)})
-
-        except Exception as e:
-            error_message = f"Error sending message: {str(e)}"
-            logger.exception(error_message)
-            if self.on_message:
-                self.on_message({"role": "error", "content": error_message})
-        finally:
-            if self.on_loading:
-                self.on_loading(False)
+        response = self.agent.run(user_message)
+        if self.on_message:
+            self.on_message({"role": "assistant", "content": response.content})
+        if self.on_loading:
+            self.on_loading(False)
 
     def cancel(self):
         """

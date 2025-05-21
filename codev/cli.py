@@ -8,9 +8,8 @@ import sys
 import argparse
 from loguru import logger
 
-from codev.config import AppConfig, load_config, CLI_VERSION
-from codev.terminal_chat import run_terminal_chat
-from codev.approvals import ApprovalPolicy
+from codev.config import load_config, CLI_VERSION
+from codev.terminal_chat import TerminalChat
 
 
 def main():
@@ -19,9 +18,10 @@ def main():
     parser.add_argument("--prompt", "-p", type=str, help="Initial prompt to send to the model")
     parser.add_argument("--model", "-m", type=str, help="Model to use (e.g., gpt-4o, gpt-4-turbo)")
     parser.add_argument("--config", "-c", type=str, help="Path to configuration file")
-    parser.add_argument("--image", "-i", action='append', help="Path to image file to include with the prompt (can be used multiple times)")
-    parser.add_argument("--approval", "-a", type=str, choices=["suggest", "auto-edit", "full-auto"], 
-                      default="suggest", help="Approval policy for commands")
+    parser.add_argument("--image", "-i", action='append',
+                        help="Path to image file to include with the prompt (can be used multiple times)")
+    parser.add_argument("--approval", "-a", type=str, choices=["suggest", "auto-edit", "full-auto"],
+                        default="suggest", help="Approval policy for commands")
     parser.add_argument("--full-stdout", "-f", action="store_true", help="Show full command output")
     parser.add_argument("--version", "-v", action="store_true", help="Show version information")
 
@@ -45,13 +45,14 @@ def main():
         config.model = args.model
 
     # Run terminal chat
-    run_terminal_chat(
+    m = TerminalChat(
         config=config,
         prompt=args.prompt,
         image_paths=args.image,
         approval_policy=args.approval,
         full_stdout=args.full_stdout
     )
+    m.run()
 
 
 if __name__ == "__main__":

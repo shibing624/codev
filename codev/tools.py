@@ -30,6 +30,7 @@ class ShellTool:
             The command output
         """
         try:
+            logger.info(f"Executing command: `{command}`")
             # Execute the command
             if is_background:
                 # Run in background
@@ -83,7 +84,7 @@ class ShellTool:
                     except:
                         pass
                     result = "Command execution timed out or error occurred"
-
+            logger.info(f"Command output: `{result}`")
             return result
         except Exception as e:
             error_msg = f"Error executing command: {str(e)}"
@@ -112,6 +113,7 @@ class FileTool:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
+            logger.info(f"Successfully read file: {path}")
             return content
         except Exception as e:
             error_msg = f"Error reading file: {str(e)}"

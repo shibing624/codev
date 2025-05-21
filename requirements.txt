@@ -1,5 +1,5 @@
-agentica>=1.0.6
-openai>=1.0.0
-loguru>=0.7.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
+agentica
+openai
+loguru
+pydantic
+python-dotenv

@@ -8,6 +8,7 @@ import os
 import enum
 import asyncio
 from loguru import logger
+from agentica.model.message import SystemMessage
 
 from codev.models import get_available_models
 
@@ -172,16 +173,14 @@ class CommandHandler:
                 if model not in available_models:
                     print(
                         f"{TermColor.YELLOW}Warning: '{model}' is not in the list of available models.{TermColor.RESET}")
+                    model = self.terminal.config.model  # Keep current model if invalid selection
 
             # Update model
             self.terminal.config.model = model
             print(f"{TermColor.GREEN}Switched to model: {model}{TermColor.RESET}")
 
             # Add system message to conversation history
-            self.terminal.conversation_history.append({
-                "role": "system",
-                "content": f"Model has been switched to {model}."
-            })
+            self.terminal.agent.agent.memory.add_message(SystemMessage(content=f"Model has been switched to {model}."))
 
         except Exception as e:
             print(f"{TermColor.RED}Error switching model: {str(e)}{TermColor.RESET}")
@@ -230,11 +229,7 @@ class CommandHandler:
         print(f"{TermColor.GREEN}Switched approval policy to: {policy_colors.get(policy, TermColor.WHITE)}"
               f"{policy}{TermColor.RESET}")
 
-        # Add system message to conversation history
-        self.terminal.conversation_history.append({
-            "role": "system",
-            "content": f"Approval policy has been switched to {policy}."
-        })
+        self.terminal.agent.agent.memory.add_message(SystemMessage(content= f"Approval policy has been switched to {policy}."))
 
     def show_history(self, args=None):
         """
@@ -306,26 +301,26 @@ class CommandHandler:
     async def _generate_summary(self, messages):
         """Asynchronous method to generate conversation summary"""
         try:
-            response = self.terminal.client.chat.completions.create(
-                model=self.terminal.config.model,
-                messages=[
-                    {"role": "system",
-                     "content": "You are a professional programming assistant. Please generate a concise summary of the previous conversation, "
-                                "including tasks executed, files modified, and important decisions."
-                     },
-                    *messages
-                ],
-                temperature=0.7
-            )
-            return response.choices[0].message.content
+            messages = [
+                {"role": "system",
+                 "content": "You are a professional programming assistant. Please generate a concise summary of the previous conversation, "
+                            "including tasks executed, files modified, and important decisions. "
+                            "输出语言保持跟用户输入一致，如果用户输入包含中文，输出中文，否则输出英文。"
+                 },
+                *messages
+            ]
+            # Call the model to generate summary
+            response = await self.terminal.agent.agent.arun(messages)
+            return response.content
         except Exception as e:
             logger.error(f"Error generating summary: {str(e)}")
             return None
 
     def compact_context(self):
         """Compress conversation context into a summary"""
-        if len(self.terminal.conversation_history) <= 2:
-            print(f"{TermColor.YELLOW}Conversation history too short, no need to compress.{TermColor.RESET}")
+        if len(self.terminal.agent.conversation_history) <= 2:
+            print(f"{TermColor.YELLOW}Conversation history too short, no need to compress. "
+                  f"chat size: {len(self.terminal.agent.conversation_history)}{TermColor.RESET}")
             return
 
         print(f"{TermColor.CYAN}Compressing conversation context...{TermColor.RESET}")
@@ -337,7 +332,7 @@ class CommandHandler:
             # Get summary
             loop = asyncio.get_event_loop()
             summary = loop.run_until_complete(
-                self._generate_summary(self.terminal.conversation_history)
+                self._generate_summary(self.terminal.agent.conversation_history)
             )
 
             if not summary:
@@ -346,9 +341,9 @@ class CommandHandler:
                 return
 
             # Reset conversation history, keeping only the summary
-            self.terminal.conversation_history = [
+            self.terminal.agent.conversation_history = [
                 {"role": "system", "content": "You are a helpful programming assistant."},
-                {"role": "system", "content": f"Conversation summary: {summary}"}
+                {"role": "user", "content": f"Conversation summary: {summary}"}
             ]
 
             print(f"{TermColor.GREEN}Conversation context has been compressed.{TermColor.RESET}")

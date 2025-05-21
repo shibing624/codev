@@ -13,7 +13,7 @@ from codev.config import AppConfig
 if __name__ == '__main__':
     terminal = TerminalChat(
         config=AppConfig(),
-        prompt="写一个快排的python脚本，保存为b.py",  # Initial prompt (optional)
+        # prompt="写一个快排的python脚本，保存为b.py",  # Initial prompt (optional)
         approval_policy="full-auto",  # Options: "suggest", "auto-edit", "full-auto"
     )
-    asyncio.run(terminal.run())
+    terminal.run()
