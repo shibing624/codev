@@ -536,6 +536,18 @@ class TerminalChat:
             if len(self._input_history) > 50:
                 self._input_history = self._input_history[-50:]
 
+    def update_approval_policy(self, new_policy: str):
+        """
+        Update the approval policy for both TerminalChat and its agent
+        
+        Args:
+            new_policy: The new approval policy to set
+        """
+        self.approval_policy = new_policy
+        if hasattr(self, 'agent'):
+            self.agent.approval_policy = new_policy
+        logger.info(f"Updated approval policy to: {new_policy}")
+
 
 if __name__ == '__main__':
     terminal = TerminalChat()

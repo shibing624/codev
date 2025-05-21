@@ -192,41 +192,39 @@ class CommandHandler:
             "full-auto": "Fully automatic mode, no confirmation needed"
         }
 
-        # Custom colors
-        policy_colors = {
-            "suggest": TermColor.WHITE,
-            "auto-edit": TermColor.BRIGHT_GREEN,
-            "full-auto": TermColor.GREEN,
-        }
-
         print(f"{TermColor.CYAN}Available approval policies:{TermColor.RESET}")
         for i, policy in enumerate(policies, 1):
             current = " (currently used)" if policy == self.terminal.approval_policy else ""
-            policy_color = policy_colors.get(policy, TermColor.WHITE)
-            print(f"{i}. {policy_color}{policy}{TermColor.RESET} - {policy_descriptions[policy]}{current}")
+            color = POLICY_COLORS.get(policy, TermColor.WHITE)
+            print(f"{i}. {color}{policy}{TermColor.RESET} - {policy_descriptions[policy]}{current}")
 
-        print(f"\nCurrent policy: {policy_colors.get(self.terminal.approval_policy, TermColor.WHITE)}"
+        print(f"\nCurrent policy: {POLICY_COLORS.get(self.terminal.approval_policy, TermColor.WHITE)}"
               f"{self.terminal.approval_policy}{TermColor.RESET}")
-        print(f"Please enter the policy number or name to use:")
+        print("Please enter the policy number or name to use:")
 
-        selection = input("> ").strip().lower()
+        try:
+            selection = input("> ").strip()
 
-        # Check if it's a number
-        if selection.isdigit() and 1 <= int(selection) <= len(policies):
-            policy = policies[int(selection) - 1]
-        else:
-            # Assume it's a policy name
-            policy = selection
-            if policy not in policies:
-                print(f"{TermColor.RED}Invalid policy: '{policy}'. Keeping current policy unchanged.{TermColor.RESET}")
-                return
+            # Check if it's a number
+            if selection.isdigit() and 1 <= int(selection) <= len(policies):
+                policy = policies[int(selection) - 1]
+            else:
+                # Assume it's a policy name
+                policy = selection
+                if policy not in policies:
+                    print(f"{TermColor.YELLOW}Warning: '{policy}' is not a valid policy. Using current policy.{TermColor.RESET}")
+                    return
 
-        # Update policy
-        self.terminal.approval_policy = policy
-        print(f"{TermColor.GREEN}Switched approval policy to: {policy_colors.get(policy, TermColor.WHITE)}"
-              f"{policy}{TermColor.RESET}")
+            # Update policy using the new method
+            self.terminal.update_approval_policy(policy)
+            print(f"{TermColor.GREEN}Switched to approval policy: {policy}{TermColor.RESET}")
 
-        self.terminal.agent.agent.memory.add_message(SystemMessage(content= f"Approval policy has been switched to {policy}."))
+            # Add system message to conversation history
+            self.terminal.agent.agent.memory.add_message(SystemMessage(content=f"Approval policy has been switched to {policy}."))
+
+        except Exception as e:
+            print(f"{TermColor.RED}Error switching approval policy: {str(e)}{TermColor.RESET}")
+            logger.exception("Error switching approval policy:")
 
     def show_history(self, args=None):
         """

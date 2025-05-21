@@ -50,7 +50,6 @@ class CodevAgent:
             self,
             config: 'AppConfig',
             approval_policy: str = "auto-edit",
-            on_loading: Callable[[bool], None] = None,
             get_command_confirmation: Optional[Callable] = None,
             history_manager=None,
             instructions: Union[List[str], str, None] = None,
